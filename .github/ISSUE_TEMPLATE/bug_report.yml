@@ -1,0 +1,20 @@
+name: Bug report
+description: Report a reproducible defect.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes: {label: Summary, description: What happened and what did you expect?}
+    validations: {required: true}
+  - type: textarea
+    id: reproduce
+    attributes: {label: Reproduction steps}
+    validations: {required: true}
+  - type: dropdown
+    id: environment
+    attributes: {label: Environment, options: ["Windows","macOS","Linux","Docker"]}
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes: {label: Sanitised logs, description: Remove credentials, cookies, private URLs and personal data.}

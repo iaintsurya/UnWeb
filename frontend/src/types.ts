@@ -1,0 +1,3 @@
+export type Finding={id:string;title:string;severity:string;confidence:string;evidence:string;recommendation:string};
+export type Page={url:string;status_code?:number|null;title?:string|null;links:string[];scripts:string[];stylesheets:string[];images:string[];metadata:Record<string,string>};
+export type ScanResult={id:string;requested_url:string;final_url:string;status_code:number;scanned_at:string;title?:string|null;description?:string|null;headers:Record<string,string>;technologies:{name:string;confidence:string;evidence:string}[];assets:{kind:string;url:string}[];page:Page;pages:Page[];findings:Finding[];js_analysis:Record<string,unknown>[];notes:string[];reconstruction?:Record<string,string>|null};

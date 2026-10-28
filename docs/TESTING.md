@@ -1,0 +1,2 @@
+# Testing
+Run `cd backend && python -m pytest`. Tests cover URL rejection, DNS private-address rejection, HTML extraction, missing security headers, and JS lexical clues. Before release, add mocked transport tests for redirect chains, oversized bodies, timeout, malformed HTML, and response content types. Frontend should be checked with `npm run build`; add component tests for URL form, filters, evidence drawer and empty/error states. Use local fixtures and mocks, not third-party websites, as automated test targets.
