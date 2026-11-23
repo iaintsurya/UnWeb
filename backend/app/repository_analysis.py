@@ -33,7 +33,7 @@ SOURCE_EXTENSIONS = {
 }
 SPECIAL_FILENAMES = {
     "dockerfile", "makefile", "procfile", "requirements.txt",
-    "pipfile", "gemfile", "go.mod", "cargo.toml", "pom.xml",
+    "pipfile", "gemfile", "go.mod", "cargo.toml", "cargo.lock", "pom.xml",
 }
 SECRET_ASSIGNMENT = re.compile(
     r"""(?ix)\b(?P<key>password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?token|auth[_-]?token|private[_-]?key)\b\s*[:=]\s*["'](?P<value>[^"'\r\n]{8,})["']"""
@@ -110,6 +110,7 @@ def _is_candidate(path: Path) -> bool:
         name == ".env"
         or name.startswith(".env.")
         or name.endswith(".env")
+        or (name.startswith("requirements") and name.endswith((".txt", ".in")))
         or name in SPECIAL_FILENAMES
         or path.suffix.lower() in SOURCE_EXTENSIONS
     )
