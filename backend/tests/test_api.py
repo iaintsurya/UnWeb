@@ -49,6 +49,10 @@ def test_scan_api_persists_result_and_lists_history(tmp_path, monkeypatch):
         assert loaded.status_code == 200
         assert loaded.json()["title"] == "Example"
 
+        security = client.get("/api/scans/api-test-scan/security")
+        assert security.status_code == 200
+        assert security.json()["security_findings"] == []
+
 
 def test_scan_api_returns_404_for_unknown_saved_scan(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "missing.sqlite3")
@@ -122,6 +126,7 @@ def test_repository_scan_api_returns_redacted_report_and_inventory(monkeypatch):
     report = response.json()
     assert report["repository"] == "sample-project"
     assert report["files_scanned"] == 2
+    assert any(item["source"] == "repository" for item in report["security_findings"])
     assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
     assert any(item["name"] == "express" for item in report["dependency_inventory"])
     assert "repository-secret-value-123" not in response.text
@@ -234,6 +239,7 @@ def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkey
     assert report["repository"] == "owner/repo"
     assert report["source"]["commit_sha"] == "0123456789abcdef0123456789abcdef01234567"
     assert report["source"]["requested_ref"] == "main"
+    assert any(item["source"] == "repository" for item in report["security_findings"])
     assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
     assert "repository-secret-value-123" not in response.text
 
