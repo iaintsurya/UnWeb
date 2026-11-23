@@ -16,6 +16,7 @@ import zipfile
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .finding_schema import repository_security_findings
 from typing import Iterator
 
 MAX_FILE_BYTES = 1_000_000
@@ -101,6 +102,9 @@ class RepositoryReport:
             "repository": self.repository,
             "scanner_version": self.scanner_version,
             "findings": [asdict(item) for item in self.findings],
+            "security_findings": repository_security_findings(
+                self.findings, self.repository, scanner_version=self.scanner_version
+            ),
             "dependency_inventory": [asdict(item) for item in self.dependency_inventory],
             "dependency_count": len(self.dependency_inventory),
             "dependency_inventory_truncated": self.dependency_inventory_truncated,
