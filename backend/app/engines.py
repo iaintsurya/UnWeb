@@ -54,7 +54,8 @@ def analyze_html(base_url: str, html: str):
 
 def _cookie_observations(headers: dict[str, str]) -> list[Finding]:
     """Report cookie-attribute observations without retaining cookie values."""
-    raw = headers.get("__unweb_set_cookie_headers") or headers.get("set-cookie") or ""
+    normalized = {str(key).lower(): value for key, value in headers.items()}
+    raw = normalized.get("__unweb_set_cookie_headers") or normalized.get("set-cookie") or ""
     if not raw:
         return []
 
