@@ -395,7 +395,7 @@ def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[
         except (json.JSONDecodeError, TypeError):
             return []
         packages = data.get("packages", {})
-        if isinstance(packages, dict):
+        if isinstance(packages, dict) and packages:
             for package_path, package in packages.items():
                 if not package_path or not isinstance(package, dict):
                     continue
@@ -411,6 +411,23 @@ def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[
                     resolved_version=version if isinstance(version, str) else None,
                     dependency_group="locked",
                 ))
+        else:
+            # npm lockfile v1 stores dependencies as a nested tree.
+            def add_v1_dependencies(tree: object) -> None:
+                if not isinstance(tree, dict):
+                    return
+                for package_name, package in tree.items():
+                    if not isinstance(package, dict):
+                        continue
+                    version = package.get("version")
+                    records.append(DependencyRecord(
+                        name=str(package_name), ecosystem="npm",
+                        source_path=relative_path, source_type="lockfile",
+                        resolved_version=version if isinstance(version, str) else None,
+                        dependency_group="locked",
+                    ))
+                    add_v1_dependencies(package.get("dependencies", {}))
+            add_v1_dependencies(data.get("dependencies", {}))
 
     elif name == "pyproject.toml":
         try:
