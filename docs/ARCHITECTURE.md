@@ -74,11 +74,12 @@ Operator selects an authorised local checkout
   -> skip generated, dependency, and VCS directories
   -> enforce file-count, per-file, total-byte, and finding budgets
   -> run Python AST checks and cross-language/configuration lexical checks
+  -> parse supported dependency manifests/lockfiles into an inventory
   -> redact credential-shaped evidence
   -> emit JSON with suspected status and explicit limitations
 ```
 
-The prototype has no GitHub API integration, clone operation, dependency installation, network access, or code execution. Python AST checks cover selected dangerous-call patterns; there is no control-flow, data-flow, or inter-file reachability analysis. It is not called by the FastAPI application. The next integration stage must add authenticated repository selection, immutable commit identity, safe archive/checkout ingestion, job isolation, durable evidence, and a common finding schema before dashboard or automated PR-review use.
+The prototype has no GitHub API integration, clone operation, dependency installation, network access, or code execution. Python AST checks cover selected dangerous-call patterns; selected manifest/lockfile parsers inventory dependency declarations and resolved versions without querying advisories. There is no control-flow, data-flow, inter-file reachability, or package vulnerability analysis. It is not called by the FastAPI application. The next integration stage must add authenticated repository selection, immutable commit identity, safe archive/checkout ingestion, job isolation, durable evidence, and a common finding schema before dashboard or automated PR-review use.
 
 ## Finding and evidence model (planned)
 
