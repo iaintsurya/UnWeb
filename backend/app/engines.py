@@ -92,16 +92,15 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
     return findings
 
 def _decode_js_literal(value: str) -> str:
-    """Decode the small set of escapes useful for URL-like JS string literals."""
+    """Decode common escapes needed to report URL-like JavaScript strings."""
     replacements = {
-        r"\\": "\\",
-        r"\/": "/",
-        r"\\'": "'",
-        r'\\"': '"',
-        r"\\`": "`",
-        r"\\n": "\n",
-        r"\\r": "\r",
-        r"\\t": "\t",
+        "\\\\": "\\",
+        "\\/": "/",
+        "\\'": "'",
+        '\\"': '"',
+        "\\n": "\n",
+        "\\r": "\r",
+        "\\t": "\t",
     }
     for encoded, decoded in replacements.items():
         value = value.replace(encoded, decoded)
@@ -109,14 +108,15 @@ def _decode_js_literal(value: str) -> str:
 
 
 def _iter_js_string_literals(body: str):
-    """Yield string/template literal values while ignoring line/block comments.
+    """Yield string/template literal clues while ignoring JS comments.
 
-    This intentionally is not a full JavaScript parser. It records source offsets
-    and line numbers so every result can be shown as a traceable lexical clue.
+    This is a deliberately small lexer, not a complete JavaScript parser.
+    Offsets and line numbers keep each match traceable to its delivered source.
     """
     index = 0
     line = 1
     length = len(body)
+    backtick = chr(96)
 
     while index < length:
         char = body[index]
@@ -139,7 +139,7 @@ def _iter_js_string_literals(body: str):
                 index += 1
             continue
 
-        if char not in {"'", '"', "`"}:
+        if char not in {"'", '"', backtick}:
             if char == "\n":
                 line += 1
             index += 1
@@ -162,7 +162,7 @@ def _iter_js_string_literals(body: str):
                 index += 2
                 continue
 
-            if quote == "`" and current == "$" and index + 1 < length and body[index + 1] == "{":
+            if quote == backtick and current == "$" and index + 1 < length and body[index + 1] == "{":
                 dynamic = True
                 break
 
@@ -184,21 +184,24 @@ def _iter_js_string_literals(body: str):
                 "dynamic_template": dynamic,
             }
 
-        # If a template contained an expression, skip its interpolation with
-        # brace-depth tracking and continue collecting any following literals.
-        if quote == "`" and dynamic:
+        # Skip a template interpolation with brace-depth tracking. Nested
+        # strings and comments are skipped so their braces don't alter depth.
+        if quote == backtick and dynamic:
             depth = 1
             index += 2
             while index < length and depth:
                 current = body[index]
+                following = body[index + 1] if index + 1 < length else ""
                 if current == "\n":
                     line += 1
-                if current in {"'", '"', "`"}:
+                if current in {"'", '"', backtick}:
                     nested_quote = current
                     index += 1
                     while index < length:
                         item = body[index]
-                        if item == "\\":
+                        if item == "\\" and index + 1 < length:
+                            if body[index + 1] == "\n":
+                                line += 1
                             index += 2
                             continue
                         if item == "\n":
@@ -207,12 +210,12 @@ def _iter_js_string_literals(body: str):
                         if item == nested_quote:
                             break
                     continue
-                if current == "/" and index + 1 < length and body[index + 1] == "/":
+                if current == "/" and following == "/":
                     index += 2
                     while index < length and body[index] not in "\r\n":
                         index += 1
                     continue
-                if current == "/" and index + 1 < length and body[index + 1] == "*":
+                if current == "/" and following == "*":
                     index += 2
                     while index < length:
                         if body[index] == "\n":
@@ -227,19 +230,20 @@ def _iter_js_string_literals(body: str):
                 elif current == "}":
                     depth -= 1
                 index += 1
-            if index < length and body[index] == "`":
+            if index < length and body[index] == backtick:
                 index += 1
 
 
 def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
-    """Extract explainable route, library, and source-map clues from a JS file."""
-    route_pattern = re.compile(r"^/(?:api|v\\d+|auth|graphql|admin)(?:/|$)", re.I)
+    """Extract explainable route, library, and source-map clues from JS."""
+    route_pattern = re.compile(r"^/(?:api|v\d+|auth|graphql|admin)(?:/|$)", re.I)
     call_context = re.compile(
-        r"(?:\\bfetch|\\baxios(?:\\.(get|post|put|patch|delete))?|"
-        r"\\b(?:get|post|put|patch|delete)\\s*\\(|"
-        r"\\b(?:url|path|endpoint)\\s*[:=])\\s*\\(?\\s*$",
+        r"(?:\bfetch|\baxios(?:\.(get|post|put|patch|delete))?|"
+        r"\b(?:get|post|put|patch|delete)\s*\(|"
+        r"\b(?:url|path|endpoint)\s*[:=])\s*\(?\s*$",
         re.I,
     )
+
     references = []
     routes = []
     for literal in _iter_js_string_literals(body):
@@ -249,8 +253,8 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
 
         offset = int(literal["offset"])
         prefix = body[max(0, offset - 180):offset]
-        line_start = body.rfind("\\n", 0, offset) + 1
-        line_end = body.find("\\n", offset)
+        line_start = body.rfind("\n", 0, offset) + 1
+        line_end = body.find("\n", offset)
         if line_end < 0:
             line_end = len(body)
         source_line = body[line_start:line_end].strip()[:180]
@@ -276,11 +280,11 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
             break
 
     library_rules = [
-        ("React", r"React\\.createElement|__REACT_DEVTOOLS_GLOBAL_HOOK__|react-dom/(?:client|server)|from\\s*[\"']react[\"']"),
+        ("React", r"React\.createElement|__REACT_DEVTOOLS_GLOBAL_HOOK__|react-dom/(?:client|server)|from\s*[\"']react[\"']"),
         ("Next.js", r"__NEXT_DATA__|next/(?:router|navigation)|/_next/(?:static|image)|next/font"),
-        ("Vue", r"createApp\\s*\\(|from\\s*[\"']vue[\"']|__VUE__"),
+        ("Vue", r"createApp\s*\(|from\s*[\"']vue[\"']|__VUE__"),
         ("Angular", r"@angular/core|ng-version=|ɵɵdefineComponent"),
-        ("jQuery", r"jQuery(?:\\.fn)?|window\\.\\$|\\$\\(\\s*(?:document|[\"'])"),
+        ("jQuery", r"jQuery(?:\.fn)?|window\.\$|\$\(\s*(?:document|[\"'])"),
         ("Svelte", r"svelte/internal|svelte-hmr"),
         ("Astro", r"astro-island|astro:"),
     ]
@@ -290,7 +294,7 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
         match = re.search(pattern, body, re.I)
         if match:
             libraries.append(name)
-            evidence = body[max(0, match.start() - 45):min(len(body), match.end() + 65)].replace("\\n", " ")[:140]
+            evidence = body[max(0, match.start() - 45):min(len(body), match.end() + 65)].replace("\n", " ")[:140]
             library_evidence.append({
                 "name": name,
                 "confidence": "medium",
@@ -299,13 +303,11 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
             })
 
     source_maps = []
-    for match in re.finditer(
-        r"(?://#|//@|/\\*[#@])\\s*sourceMappingURL\\s*=\\s*([^\\s*]+)",
-        body,
-    ):
+    source_map_pattern = r"(?://#|//@|/\*[#@])\s*sourceMappingURL\s*=\s*([^\s*]+)"
+    for match in re.finditer(source_map_pattern, body):
         source_maps.append({
             "reference": match.group(1).strip().rstrip("*/"),
-            "line": body.count("\\n", 0, match.start()) + 1,
+            "line": body.count("\n", 0, match.start()) + 1,
         })
         if len(source_maps) >= 10:
             break
@@ -314,7 +316,7 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
     return {
         "url": script_url,
         "bytes_analyzed": byte_count,
-        "line_count": body.count("\\n") + 1,
+        "line_count": body.count("\n") + 1,
         "routes": routes,
         "route_references": references,
         "possible_libraries": libraries,
