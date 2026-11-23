@@ -198,7 +198,7 @@ def _analyse_line(
             "Remove the private key from source control, rotate the associated credential, and store keys in a protected secret store.",
         ))
 
-    if re.search(r"\bverify\s*=\s*False\b", line, re.I):
+    if suffix not in {".py", ".pyi"} and re.search(r"\bverify\s*=\s*False\b", line, re.I):
         findings.append(_finding(
             "tls-certificate-verification-disabled", "transport-security",
             "TLS certificate verification is disabled", "medium", "high",
