@@ -160,7 +160,7 @@ def test_assets_and_scripts_are_collected_across_discovered_pages(monkeypatch):
     about = (
         b'<html><head><title>About</title><script src="/about.js"></script>'
         b'<link rel="stylesheet" href="/about.css"></head><body>'
-        b'<script src="/wp-content/themes/site.js"></script>About</body></html>'
+        b'<!-- observed wp-content marker -->About</body></html>'
     )
     responses = {
         "https://example.com/": ({"content-type": "text/html"}, root),
