@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 from .models import ScanRequest, ScanResult
-from .scanner import scan_site
+from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
 
 app=FastAPI(title="UnWeb API",version="0.1.0",description="Bounded passive website intelligence.")
@@ -16,6 +16,7 @@ async def health(): return {"status":"ok","service":"unweb-api","version":"0.1.0
 @app.post("/api/scans",response_model=ScanResult)
 async def create_scan(payload:ScanRequest):
     try: result=await scan_site(payload.url,payload.max_pages,True)
+    except UnsupportedContentType as exc: raise HTTPException(415,detail={"code":"unsupported_media_type","message":str(exc)}) from exc
     except URLRejected as exc: raise HTTPException(400,detail={"code":"target_rejected","message":str(exc)}) from exc
     except httpx.TimeoutException as exc: raise HTTPException(504,detail={"code":"target_timeout","message":"Target timed out."}) from exc
     except httpx.HTTPError as exc: raise HTTPException(502,detail={"code":"fetch_failed","message":"Target request failed."}) from exc
@@ -39,8 +40,11 @@ async def intelligence(scan_id:str):
 async def sitemap(scan_id:str):
     r=RESULTS.get(scan_id)
     if not r: raise HTTPException(404,detail="Scan not found.")
+    page_ids={p.url:str(i) for i,p in enumerate(r.pages)}
+    edges=[{"source":page_ids[e.source],"target":page_ids[e.target]} for e in r.edges
+           if e.source in page_ids and e.target in page_ids]
     return {"nodes":[{"id":str(i),"url":p.url,"title":p.title,"status_code":p.status_code} for i,p in enumerate(r.pages)],
-            "edges":[{"source":"0","target":str(i)} for i in range(1,len(r.pages))]}
+            "edges":edges}
 
 @app.get("/api/scans/{scan_id}/security")
 async def security(scan_id:str):
