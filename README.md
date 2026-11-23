@@ -12,7 +12,7 @@ See [docs/SECURITY_ASSESSMENT.md](docs/SECURITY_ASSESSMENT.md) for the finding s
 
 ## Security assessment model
 
-UnWeb is intended for websites and APIs that the operator owns or is explicitly authorised to assess. The first release is a bounded passive reconnaissance and evidence-collection preview; the current scanner is **not yet a full vulnerability scanner or penetration-testing engine**. It currently collects HTML, same-origin page relationships, assets, JavaScript clues, selected response headers, and optional browser-render evidence. Those observations can inform an assessment, but they do not prove that a vulnerability exists.
+UnWeb is intended for websites and APIs that the operator owns or is explicitly authorised to assess. The first release is a bounded passive reconnaissance and evidence-collection preview; the current scanner is **not yet a full vulnerability scanner or penetration-testing engine**. It currently collects HTML, same-origin page relationships, assets, JavaScript clues, selected response headers, passive `Set-Cookie` attribute observations with cookie values redacted, and optional browser-render evidence. Those observations can inform an assessment, but they do not prove that a vulnerability exists.
 
 The planned assessment workflow is:
 
