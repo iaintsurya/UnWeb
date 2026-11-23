@@ -46,9 +46,10 @@ A first read-only repository analyser is available as a local CLI at `backend/ap
 
 - credential-like assignments, selected provider-token patterns, and private-key PEM markers (with values omitted/redacted);
 - Python dynamic evaluation, shell-enabled subprocess calls, `os.system`, YAML loading without a visible SafeLoader, and pickle deserialization;
-- disabled TLS certificate verification and wildcard CORS configuration.
+- disabled TLS certificate verification and wildcard CORS configuration;
+- dependency inventory from npm package manifests/lockfiles, Python requirements and pyproject files, Cargo manifests/lockfiles, and Go module files.
 
-It applies file-count and byte budgets, skips common vendor/build/VCS folders and symlinks, and never executes repository code or makes network requests. Python dangerous-call checks use the standard-library AST; cross-language and configuration checks are lexical. Findings are heuristic and have the state `suspected`; this does not provide data-flow/reachability analysis, dependency vulnerability analysis, or complete SAST coverage. The CLI is not yet integrated with GitHub, the website scanner, API, or dashboard. Its tests run on temporary local fixtures only.
+It applies file-count and byte budgets, skips common vendor/build/VCS folders and symlinks, and never executes repository code or makes network requests. Python dangerous-call checks use the standard-library AST; cross-language and configuration checks are lexical. Security findings are heuristic and have the state `suspected`; this does not provide data-flow/reachability analysis or complete SAST coverage. Dependency inventory records declared constraints and lockfile-resolved versions only; it does not query advisories or identify vulnerable versions. The CLI is not yet integrated with GitHub, the website scanner, API, or dashboard. Its tests run on temporary local fixtures only.
 
 ## Safe validation policy
 
