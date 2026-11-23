@@ -182,3 +182,84 @@ def test_python_ast_handles_multiline_calls_and_ignores_comments(tmp_path):
     assert "python-yaml-load" in ids
     assert not any(item.line < 4 for item in findings)
     assert len([item for item in findings if item.id == "python-yaml-load"]) == 1
+
+
+
+def test_inventories_npm_manifest_and_lockfile_without_claiming_vulnerabilities(tmp_path):
+    write_file(
+        tmp_path,
+        "package.json",
+        json.dumps({
+            "dependencies": {"react": "^18.2.0", "@scope/pkg": "~2.1.0"},
+            "devDependencies": {"vitest": "^5.0.0"},
+        }),
+    )
+    write_file(
+        tmp_path,
+        "package-lock.json",
+        json.dumps({
+            "lockfileVersion": 3,
+            "packages": {
+                "": {"name": "fixture"},
+                "node_modules/react": {"version": "18.3.1"},
+                "node_modules/@scope/pkg": {"version": "2.1.4"},
+            },
+        }),
+    )
+    report = analyse_repository(tmp_path)
+    inventory = report.to_dict()["dependency_inventory"]
+    react = [item for item in inventory if item["name"] == "react"]
+    assert {item["source_type"] for item in react} == {"manifest", "lockfile"}
+    assert any(item["resolved_version"] == "18.3.1" for item in react)
+    assert any(item["version_constraint"] == "^18.2.0" for item in react)
+    assert any(item["name"] == "vitest" and item["dependency_group"] == "devDependencies" for item in inventory)
+    assert report.scanner_version == "0.2.0"
+    assert not any("vulnerable" in item["title"].lower() for item in report.findings)
+
+
+def test_inventories_python_requirements_and_pyproject_dependencies(tmp_path):
+    write_file(
+        tmp_path,
+        "pyproject.toml",
+        '[project]\ndependencies = ["fastapi>=0.100", "httpx==0.28.1"]\n'
+        '[project.optional-dependencies]\ntest = ["pytest>=8"]\n',
+    )
+    write_file(
+        tmp_path,
+        "requirements-dev.txt",
+        "ruff==0.8.0\nrequests>=2.31\n# a comment\n",
+    )
+    report = analyse_repository(tmp_path)
+    inventory = report.to_dict()["dependency_inventory"]
+    fastapi = next(item for item in inventory if item["name"] == "fastapi")
+    assert fastapi["ecosystem"] == "pypi"
+    assert fastapi["version_constraint"] == ">=0.100"
+    assert any(item["name"] == "pytest" and item["dependency_group"] == "test" for item in inventory)
+    assert any(item["name"] == "ruff" and item["version_constraint"] == "==0.8.0" for item in inventory)
+    assert any(item["name"] == "requests" and item["version_constraint"] == ">=2.31" for item in inventory)
+
+
+def test_inventories_cargo_and_go_manifests_and_lockfiles(tmp_path):
+    write_file(
+        tmp_path,
+        "Cargo.toml",
+        '[dependencies]\nserde = "1.0"\n'
+        '[dev-dependencies]\npretty_assertions = "1"\n',
+    )
+    write_file(
+        tmp_path,
+        "Cargo.lock",
+        'version = 3\n[[package]]\nname = "serde"\nversion = "1.0.210"\n',
+    )
+    write_file(
+        tmp_path,
+        "go.mod",
+        'module example.com/app\n\ngo 1.23\nrequire (\n'
+        '  github.com/pkg/errors v0.9.1\n  golang.org/x/text v0.3.0\n)\n',
+    )
+    report = analyse_repository(tmp_path)
+    inventory = report.to_dict()["dependency_inventory"]
+    assert any(item["name"] == "serde" and item["source_type"] == "manifest" for item in inventory)
+    assert any(item["name"] == "serde" and item["resolved_version"] == "1.0.210" for item in inventory)
+    assert any(item["name"] == "pretty_assertions" and item["dependency_group"] == "dev-dependencies" for item in inventory)
+    assert any(item["name"] == "github.com/pkg/errors" and item["version_constraint"] == "v0.9.1" for item in inventory)
