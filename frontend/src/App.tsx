@@ -2,7 +2,8 @@ import {useEffect,useMemo,useState} from "react";
 import type {FormEvent, ReactNode} from "react";
 import {Activity,ArrowUpRight,Braces,Check,ChevronDown,Code2,Download,FileCode2,Globe2,Layers3,LockKeyhole,Network,Search,ShieldCheck,X,CircleAlert} from "lucide-react";
 import type {ScanHistoryItem,ScanResult} from "./types";
-import {API_BASE_URL,apiRequest} from "./lib/api";\nimport SitemapGraph from "./SitemapGraph";
+import {API_BASE_URL,apiRequest} from "./lib/api";
+import SitemapGraph from "./SitemapGraph";
 const API=API_BASE_URL;type Tab="Overview"|"Sitemap"|"JavaScript"|"Security"|"Reconstruction";
 export default function App(){
  const[url,setUrl]=useState(""),[scan,setScan]=useState<ScanResult|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[tab,setTab]=useState<Tab>("Overview"),[query,setQuery]=useState(""),[detail,setDetail]=useState<{title:string;body:string}|null>(null),[history,setHistory]=useState<ScanHistoryItem[]>([]),[maxPages,setMaxPages]=useState(8);
