@@ -49,3 +49,6 @@ Frontend tests cover exact path overlap, query/trailing-slash normalisation, par
 ## Website scan authorisation tests
 
 The API test suite verifies that `POST /api/scans` returns HTTP 403 with `website_authorisation_required` when `authorised` is missing/false, and accepts the request only when the explicit acknowledgement is true. The UI disables submission until the consent checkbox is checked; this acknowledgement is not a substitute for production identity and target-scope enforcement.
+## Dynamic SQL heuristic tests
+
+Backend tests cover f-string interpolation, concatenation, percent formatting and `.format()` as suspected SQL construction, while asserting that a literal placeholder query with a separate bind-parameter argument is not flagged.
