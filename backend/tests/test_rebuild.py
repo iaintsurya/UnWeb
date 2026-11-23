@@ -1,3 +1,5 @@
+from bs4 import BeautifulSoup
+
 from app.rebuild import make_reconstruction
 
 
@@ -60,8 +62,13 @@ def test_reconstruction_escapes_untrusted_text_and_attributes():
     component = result["App.tsx"]
 
     assert "<script>bad()</script>" not in preview
-    assert "onerror=" not in preview
-    assert "onload=" not in preview
+    parsed_preview = BeautifulSoup(preview, "html.parser")
+    assert all(
+        not attribute.lower().startswith("on")
+        for element in parsed_preview.find_all(True)
+        for attribute in element.attrs
+    )
+    assert "&lt;img src=x onerror=bad()&gt;" in preview
     assert "javascript:bad()" not in preview
     assert "data:text/html" not in preview
     assert "&lt;script&gt;" in preview
