@@ -39,3 +39,39 @@ def test_hsts_and_framing_checks_are_context_aware():
     protected_ids = {finding.id for finding in protected_findings}
     assert "missing-strict-transport-security" not in protected_ids
     assert "missing-framing-protection" not in protected_ids
+
+
+
+def test_cookie_attribute_observations_never_include_cookie_values():
+    secret = "sessionid=super-secret-session-value; Path=/; SameSite=None"
+    findings = analyze_security(
+        {"set-cookie": secret, "content-type": "text/html"},
+        "https://example.com/",
+    )
+    by_id = {finding.id: finding for finding in findings}
+    assert "cookie-sessionid-missing-secure" in by_id
+    assert "cookie-sessionid-missing-httponly" in by_id
+    assert "cookie-sessionid-samesite-none-without-secure" in by_id
+    rendered = " ".join(
+        [finding.title + " " + finding.evidence + " " + finding.recommendation
+         for finding in findings]
+    )
+    assert "super-secret-session-value" not in rendered
+    assert "sessionid" in rendered
+
+
+def test_cookie_attribute_parser_handles_multiple_set_cookie_lines():
+    findings = analyze_security(
+        {
+            "__unweb_set_cookie_headers": (
+                "theme=dark; Path=/; Secure; HttpOnly; SameSite=Lax\n"
+                "sid=hidden-value; Path=/"
+            )
+        },
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert not any(item.startswith("cookie-theme-") for item in ids)
+    assert "cookie-sid-missing-secure" in ids
+    assert "cookie-sid-missing-httponly" in ids
+    assert "cookie-sid-missing-samesite" in ids
