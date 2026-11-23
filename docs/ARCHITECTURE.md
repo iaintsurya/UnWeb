@@ -1,8 +1,34 @@
 # Architecture
-Current pipeline: URL normalisation -> DNS address validation -> bounded HTTP fetch -> HTML parsing -> fingerprinting -> JS lexical clues -> passive header checks -> optional reconstruction -> JSON response.
 
-Production pipeline should use authenticated API, durable jobs, isolated workers, egress-enforcing proxy/firewall, persistent evidence store and real progress events. Application-level DNS checks alone cannot fully eliminate DNS rebinding/TOCTOU risk. Public deployment requires network-level egress controls, unprivileged disposable browser containers, CPU/memory/wall-clock limits, rate limiting, audit logs and security review.
+## Current preview pipeline
 
-v0.1: safe URL intake, bounded fetch, metadata/assets/fingerprints.
-v1.0: bounded crawler, JS inventory, passive security, exports and broader tests.
-v2.0: isolated Playwright network capture, DOM/style inspector, better reconstruction, job queue, WebSockets, durable DB, CLI and CI mode.
+```text
+URL normalisation
+  -> DNS address validation (off the async event loop)
+  -> bounded HTTP fetch and redirect checks
+  -> HTML content-type validation
+  -> breadth-first same-origin page discovery
+  -> metadata, technology, and cross-page asset extraction
+  -> bounded JavaScript lexical clues
+  -> passive security-header observations
+  -> optional editable reconstruction
+  -> SQLite persistence and JSON API response
+```
+
+The sitemap contains only directed links observed in fetched HTML between pages that were successfully scanned. The API currently performs a scan in the request/response lifecycle, with a per-process limit of two active scans and a 120-second wall-clock timeout.
+
+## Persistence
+
+The preview uses the Python standard library's SQLite driver. Scan payloads are stored as JSON with indexed summary columns; the newest 250 results are retained by default. This avoids requiring a separate database service for local use. It is a single-instance development store, not a horizontally scalable production database. The path is configurable through `UNWEB_DB_PATH`.
+
+## Security boundary
+
+URL policy checks are defence in depth, not a complete SSRF boundary. DNS is checked before a request, but the HTTP client's subsequent resolution can differ (DNS rebinding / time-of-check-to-time-of-use). Public deployments must use network-level egress controls or a resolver/transport that pins validated addresses through connection establishment. Do not expose this preview API publicly until that boundary is independently verified.
+
+Production also needs an authenticated API, per-user rate limits, durable background jobs, isolated unprivileged workers, CPU/memory/wall-clock limits, audit logs, evidence retention policy, and security review. Browser automation should run in disposable workers with explicit network policy rather than in the API process.
+
+## Roadmap
+
+- **v0.2 foundation:** recursive bounded crawler, observed graph edges, SQLite scan history, cross-page asset/script collection, bounded scan concurrency, frontend API helper, tests and CI.
+- **v1.0 hardening:** connection-time DNS pinning/egress enforcement, auth and rate limiting, durable workers, stronger JavaScript analysis, evidence provenance and deeper tests.
+- **v2.0 advanced:** isolated Playwright network capture, DOM/style inspector, improved reconstruction, progress events, multi-user storage, and CLI/CI scan mode.
