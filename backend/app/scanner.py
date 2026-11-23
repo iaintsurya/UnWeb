@@ -5,7 +5,7 @@ import ipaddress
 
 from collections import deque
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlsplit, urldefrag
+from urllib.parse import urljoin, urlsplit, urlunsplit, urldefrag
 
 from .models import ScanResult
 from .url_policy import normalize_url, validate_resolved_addresses, URLRejected
