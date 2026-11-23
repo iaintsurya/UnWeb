@@ -37,4 +37,6 @@ GitHub Actions runs the current backend suite and frontend build/tests on pushes
 - High-impact tests are disabled by default and require a separately approved lab/manual workflow.
 - Findings clearly distinguish evidence from inference and do not overstate exploitability.
 - Worker isolation, network egress policy, authentication, audit trail, retention/redaction and resource limits receive independent review.
+## Common finding schema tests
 
+The backend suite includes adapter tests for website and repository evidence, stable IDs for repeated check/location pairs, independent severity and confidence values, safe validation-state normalisation, and API exposure of the common records. Existing source-specific response fields remain covered for compatibility.
