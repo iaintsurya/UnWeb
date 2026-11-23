@@ -340,3 +340,38 @@ def test_cli_accepts_zip_archive_mode(tmp_path, monkeypatch, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["repository"] == "cli-repo"
     assert result["findings"][0]["id"] == "python-dynamic-evaluation"
+
+
+
+def test_inventories_legacy_npm_v1_lockfile_nested_dependencies(tmp_path):
+    write_file(
+        tmp_path,
+        "package-lock.json",
+        json.dumps({
+            "lockfileVersion": 1,
+            "dependencies": {
+                "left-pad": {
+                    "version": "1.3.0",
+                    "dependencies": {
+                        "repeat-string": {"version": "1.6.1"}
+                    },
+                }
+            },
+        }),
+    )
+    inventory = analyse_repository(tmp_path).to_dict()["dependency_inventory"]
+    assert any(item["name"] == "left-pad" and item["resolved_version"] == "1.3.0" for item in inventory)
+    assert any(item["name"] == "repeat-string" and item["resolved_version"] == "1.6.1" for item in inventory)
+
+
+def test_zip_scanner_rejects_absolute_and_windows_style_paths(tmp_path):
+    archive = tmp_path / "path-cases.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("/absolute.py", "eval(absolute)\n")
+        zipped.writestr("C:/drive.py", "eval(drive)\n")
+        zipped.writestr(r"repo\..\windows.py", "eval(windows)\n")
+        zipped.writestr("repo/safe.py", "eval(safe)\n")
+    report = analyse_repository_archive(archive)
+    assert len([item for item in report.findings if item.id == "python-dynamic-evaluation"]) == 1
+    assert report.findings[0].path.endswith("safe.py")
+    assert report.skipped_files >= 3
