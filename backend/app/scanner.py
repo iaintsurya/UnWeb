@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 import httpx
 import re
@@ -53,7 +54,7 @@ async def safe_fetch(
 ):
     current = normalize_url(url)
     for hop in range(MAX_REDIRECTS + 1):
-        validate_resolved_addresses(current)
+        await asyncio.to_thread(validate_resolved_addresses, current)
         async with httpx.AsyncClient(
             timeout=TIMEOUT,
             follow_redirects=False,
