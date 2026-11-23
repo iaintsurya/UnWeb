@@ -69,7 +69,8 @@ The repository analyser is a separate local CLI path:
 
 ```text
 Operator selects an authorised local checkout
-  -> resolve and validate the directory (reject symlink root)
+  -> resolve and validate a directory or validate a bounded ZIP archive
+  -> for ZIP input, reject traversal/absolute paths, symlinks, duplicate paths and oversized entries; extract candidate files into a temporary directory
   -> enumerate supported source/config files without following symlinks
   -> skip generated, dependency, and VCS directories
   -> enforce file-count, per-file, total-byte, and finding budgets
@@ -79,7 +80,7 @@ Operator selects an authorised local checkout
   -> emit JSON with suspected status and explicit limitations
 ```
 
-The prototype has no GitHub API integration, clone operation, dependency installation, network access, or code execution. Python AST checks cover selected dangerous-call patterns; selected manifest/lockfile parsers inventory dependency declarations and resolved versions without querying advisories. There is no control-flow, data-flow, inter-file reachability, or package vulnerability analysis. It is not called by the FastAPI application. The next integration stage must add authenticated repository selection, immutable commit identity, safe archive/checkout ingestion, job isolation, durable evidence, and a common finding schema before dashboard or automated PR-review use.
+The prototype supports local directories and bounded user-provided ZIP archives (including downloaded source archives), but has no GitHub API integration, remote clone operation, dependency installation, network access, or code execution. Python AST checks cover selected dangerous-call patterns; selected manifest/lockfile parsers inventory dependency declarations and resolved versions without querying advisories. There is no control-flow, data-flow, inter-file reachability, or package vulnerability analysis. It is not called by the FastAPI application. The next integration stage must add authenticated repository selection, immutable commit identity, safe archive/checkout ingestion, job isolation, durable evidence, and a common finding schema before dashboard or automated PR-review use.
 
 ## Finding and evidence model (planned)
 
