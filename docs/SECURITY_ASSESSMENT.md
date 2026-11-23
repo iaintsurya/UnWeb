@@ -48,8 +48,9 @@ A first read-only repository analyser is available as a local CLI at `backend/ap
 - Python dynamic evaluation, shell-enabled subprocess calls, `os.system`, YAML loading without a visible SafeLoader, and pickle deserialization;
 - disabled TLS certificate verification and wildcard CORS configuration.
 
-It applies file-count and byte budgets, skips common vendor/build/VCS folders and symlinks, and never executes repository code or makes network requests. Findings are heuristic and have the state `suspected`; this is not AST/data-flow analysis, dependency vulnerability analysis, or complete SAST coverage. The CLI is not yet integrated with GitHub, the website scanner, API, or dashboard. Its tests run on temporary local fixtures only.
+It applies file-count and byte budgets, skips common vendor/build/VCS folders and symlinks, and never executes repository code or makes network requests. Python dangerous-call checks use the standard-library AST; cross-language and configuration checks are lexical. Findings are heuristic and have the state `suspected`; this does not provide data-flow/reachability analysis, dependency vulnerability analysis, or complete SAST coverage. The CLI is not yet integrated with GitHub, the website scanner, API, or dashboard. Its tests run on temporary local fixtures only.
 
+## Safe validation policy
 
 Default to passive mode. Active checks require explicit authorisation, scope validation and a bounded profile. Use benign markers, synthetic test records, and owner-provided test accounts. Do not automatically perform destructive writes, denial-of-service tests, credential attacks, persistence, stealth/evasion, broad data extraction, or attempts to access cloud metadata/internal services. High-impact techniques belong in a separately approved lab or manual assessment plan.
 
