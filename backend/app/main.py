@@ -69,6 +69,15 @@ async def health():
 
 @app.post("/api/scans", response_model=ScanResult)
 async def create_scan(payload: ScanRequest, request: Request):
+    if not payload.authorised:
+        raise HTTPException(
+            403,
+            detail={
+                "code": "website_authorisation_required",
+                "message": "Confirm that you own or are explicitly authorised to assess this website.",
+            },
+        )
+
     client_key = request.client.host if request.client else "unknown"
     retry_after = SCAN_RATE_LIMITER.check(client_key)
     if retry_after:
