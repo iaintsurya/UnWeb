@@ -1,5 +1,8 @@
 import asyncio
 import os
+import tempfile
+from pathlib import Path
+from urllib.parse import unquote
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -12,6 +15,7 @@ from .models import ScanRequest, ScanResult
 from .limits import SlidingWindowLimiter
 from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
+from .repository_analysis import analyse_repository_archive, MAX_ARCHIVE_BYTES
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -36,7 +40,7 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-UnWeb-Authorised", "X-Repository-Filename"],
 )
 
 # Keep resource use bounded in the preview server. The in-process limiter is
@@ -45,6 +49,9 @@ SCAN_SEMAPHORE = asyncio.Semaphore(2)
 SCAN_RATE_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 SCAN_QUEUE_TIMEOUT = 0.5
 SCAN_TIMEOUT_SECONDS = 120
+REPOSITORY_SCAN_SEMAPHORE = asyncio.Semaphore(1)
+REPOSITORY_SCAN_LIMITER = SlidingWindowLimiter(max_requests=5, window_seconds=60)
+REPOSITORY_SCAN_QUEUE_TIMEOUT = 0.5
 
 
 async def load_scan(scan_id: str) -> ScanResult:
@@ -127,6 +134,126 @@ async def create_scan(payload: ScanRequest, request: Request):
     finally:
         if acquired:
             SCAN_SEMAPHORE.release()
+
+
+
+@app.post("/api/repository-scans")
+async def create_repository_scan(request: Request):
+    """Analyse an explicitly authorised ZIP upload without persisting the archive."""
+    if request.headers.get("x-unweb-authorised", "").strip().lower() != "true":
+        raise HTTPException(
+            403,
+            detail={
+                "code": "repository_authorisation_required",
+                "message": "Confirm that you own or are authorised to assess this repository.",
+            },
+        )
+
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type not in {"application/zip", "application/x-zip-compressed", "application/octet-stream"}:
+        raise HTTPException(
+            415,
+            detail={
+                "code": "repository_archive_type_required",
+                "message": "Upload a ZIP archive using application/zip.",
+            },
+        )
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_ARCHIVE_BYTES:
+                raise HTTPException(
+                    413,
+                    detail={
+                        "code": "repository_archive_too_large",
+                        "message": "Repository ZIP uploads are limited to 50 MB.",
+                    },
+                )
+        except ValueError:
+            raise HTTPException(
+                400,
+                detail={"code": "invalid_content_length", "message": "Invalid Content-Length header."},
+            )
+
+    client_key = request.client.host if request.client else "unknown"
+    retry_after = REPOSITORY_SCAN_LIMITER.check(client_key)
+    if retry_after:
+        raise HTTPException(
+            429,
+            detail={
+                "code": "repository_scan_rate_limited",
+                "message": "Too many repository uploads from this network address. Try again shortly.",
+            },
+            headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
+        )
+
+    acquired = False
+    temporary_path: str | None = None
+    try:
+        try:
+            await asyncio.wait_for(
+                REPOSITORY_SCAN_SEMAPHORE.acquire(),
+                timeout=REPOSITORY_SCAN_QUEUE_TIMEOUT,
+            )
+            acquired = True
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(
+                429,
+                detail={
+                    "code": "repository_scan_capacity_reached",
+                    "message": "A repository analysis is already running. Try again shortly.",
+                },
+                headers={"Retry-After": "2"},
+            ) from exc
+
+        descriptor, temporary_path = tempfile.mkstemp(prefix="unweb-upload-", suffix=".zip")
+        total_bytes = 0
+        with os.fdopen(descriptor, "wb") as destination:
+            async for chunk in request.stream():
+                total_bytes += len(chunk)
+                if total_bytes > MAX_ARCHIVE_BYTES:
+                    raise HTTPException(
+                        413,
+                        detail={
+                            "code": "repository_archive_too_large",
+                            "message": "Repository ZIP uploads are limited to 50 MB.",
+                        },
+                    )
+                destination.write(chunk)
+
+        if total_bytes == 0:
+            raise HTTPException(
+                400,
+                detail={"code": "empty_repository_archive", "message": "The uploaded ZIP archive is empty."},
+            )
+
+        try:
+            report = await asyncio.to_thread(analyse_repository_archive, temporary_path)
+        except ValueError as exc:
+            raise HTTPException(
+                400,
+                detail={"code": "invalid_repository_archive", "message": str(exc)},
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                400,
+                detail={"code": "repository_archive_read_failed", "message": "The repository archive could not be read."},
+            ) from exc
+
+        supplied_name = unquote(request.headers.get("x-repository-filename", "repository.zip"))
+        safe_name = Path(supplied_name.replace("\\", "/")).name
+        repository_name = Path(safe_name).stem
+        report.repository = repository_name[:100] or "repository"
+        return report.to_dict()
+    finally:
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+        if acquired:
+            REPOSITORY_SCAN_SEMAPHORE.release()
 
 
 @app.get("/api/scans")
