@@ -22,14 +22,14 @@ function pageLabel(page: Page): string {
 export default function SitemapGraph({ pages, edges }: Props) {
   if (pages.length === 0) return null;
 
-  const positions = new Map(
+  const positions = new Map<string, { x: number; y: number }>(
     pages.map((page, index) => [
       page.url,
       {
         x: 24 + (index % 3) * COLUMN_WIDTH,
         y: 24 + Math.floor(index / 3) * ROW_HEIGHT,
       },
-    ]),
+    ] as const),
   );
   const rows = Math.ceil(pages.length / 3);
   const width = 3 * COLUMN_WIDTH + 24;
