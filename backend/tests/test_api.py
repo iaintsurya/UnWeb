@@ -101,6 +101,10 @@ def make_repository_zip() -> bytes:
             "sample-project/package.json",
             json.dumps({"dependencies": {"express": "^4.18.0"}}),
         )
+        archive.writestr(
+            "sample-project/src/routes.py",
+            "from fastapi import FastAPI\napp = FastAPI()\n@app.get('/api/health')\ndef health(): return {'ok': True}\n",
+        )
     return buffer.getvalue()
 
 
@@ -127,8 +131,10 @@ def test_repository_scan_api_returns_redacted_report_and_inventory(monkeypatch):
     assert report["repository"] == "sample-project"
     assert report["files_scanned"] == 2
     assert any(item["source"] == "repository" for item in report["security_findings"])
+    assert any(item["path"] == "/api/health" for item in report["route_inventory"])
     assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
     assert any(item["name"] == "express" for item in report["dependency_inventory"])
+    assert any(item["method"] == "GET" and item["path"] == "/api/health" for item in report["route_inventory"])
     assert "repository-secret-value-123" not in response.text
 
 
