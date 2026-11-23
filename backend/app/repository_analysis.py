@@ -22,6 +22,7 @@ MAX_FILE_BYTES = 1_000_000
 MAX_TOTAL_BYTES = 20_000_000
 MAX_FILES = 1_500
 MAX_FINDINGS = 500
+MAX_DEPENDENCY_RECORDS = 5_000
 MAX_ARCHIVE_BYTES = 50_000_000
 MAX_ARCHIVE_ENTRIES = 6_000
 SKIP_DIRS = {
@@ -93,6 +94,7 @@ class RepositoryReport:
     skipped_files: int
     truncated: bool
     limitations: list[str]
+    dependency_inventory_truncated: bool
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -101,6 +103,7 @@ class RepositoryReport:
             "findings": [asdict(item) for item in self.findings],
             "dependency_inventory": [asdict(item) for item in self.dependency_inventory],
             "dependency_count": len(self.dependency_inventory),
+            "dependency_inventory_truncated": self.dependency_inventory_truncated,
             "files_scanned": self.files_scanned,
             "bytes_scanned": self.bytes_scanned,
             "skipped_files": self.skipped_files,
@@ -265,7 +268,7 @@ def _analyse_python_ast(
     """Inspect Python syntax trees without importing or executing repository code."""
     try:
         tree = ast.parse(source)
-    except SyntaxError:
+    except (SyntaxError, RecursionError, ValueError):
         return []
 
     lines = source.splitlines()
@@ -366,7 +369,9 @@ def _dependency_from_requirement(
     )
 
 
-def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[DependencyRecord]:
+def _extract_dependencies(
+    path: Path, content: str, relative_path: str, *, max_records: int = MAX_DEPENDENCY_RECORDS
+) -> list[DependencyRecord]:
     """Parse common dependency manifests/lockfiles using only stdlib parsers."""
     name = path.name.lower()
     records: list[DependencyRecord] = []
@@ -374,7 +379,9 @@ def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[
     if name == "package.json":
         try:
             data = json.loads(content)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            return []
+        if not isinstance(data, dict):
             return []
         for group in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
             section = data.get(group, {})
@@ -392,7 +399,9 @@ def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[
     elif name == "package-lock.json":
         try:
             data = json.loads(content)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            return []
+        if not isinstance(data, dict):
             return []
         packages = data.get("packages", {})
         if isinstance(packages, dict) and packages:
@@ -412,10 +421,14 @@ def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[
                     dependency_group="locked",
                 ))
         else:
-            # npm lockfile v1 stores dependencies as a nested tree.
-            def add_v1_dependencies(tree: object) -> None:
+            # npm lockfile v1 stores dependencies as a nested tree. Walk it
+            # iteratively: repository-controlled nesting must not consume the
+            # Python call stack.
+            pending = [data.get("dependencies", {})]
+            while pending and len(records) <= max_records:
+                tree = pending.pop()
                 if not isinstance(tree, dict):
-                    return
+                    continue
                 for package_name, package in tree.items():
                     if not isinstance(package, dict):
                         continue
@@ -426,13 +439,16 @@ def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[
                         resolved_version=version if isinstance(version, str) else None,
                         dependency_group="locked",
                     ))
-                    add_v1_dependencies(package.get("dependencies", {}))
-            add_v1_dependencies(data.get("dependencies", {}))
+                    children = package.get("dependencies", {})
+                    if isinstance(children, dict):
+                        pending.append(children)
+                    if len(records) > max_records:
+                        break
 
     elif name == "pyproject.toml":
         try:
             data = tomllib.loads(content)
-        except (tomllib.TOMLDecodeError, TypeError):
+        except (tomllib.TOMLDecodeError, TypeError, RecursionError):
             return []
         project = data.get("project", {})
         if isinstance(project, dict):
@@ -547,7 +563,8 @@ def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[
                         source_path=relative_path, source_type="manifest",
                         version_constraint=parts[1],
                     ))
-    return records
+    # One extra record is a sentinel so the caller can report truncation.
+    return records[: max_records + 1]
 
 
 
@@ -572,6 +589,7 @@ def analyse_repository(
 
     findings: list[RepositoryFinding] = []
     dependency_inventory: list[DependencyRecord] = []
+    dependency_inventory_truncated = False
     seen: set[tuple[str, str, int]] = set()
     files_scanned = bytes_scanned = skipped_files = 0
     truncated = False
@@ -611,7 +629,17 @@ def analyse_repository(
         files_scanned += 1
         bytes_scanned += len(raw)
         relative_path = path.relative_to(root).as_posix()
-        dependency_inventory.extend(_extract_dependencies(path, content, relative_path))
+        remaining_dependencies = MAX_DEPENDENCY_RECORDS - len(dependency_inventory)
+        if not dependency_inventory_truncated:
+            extracted_dependencies = _extract_dependencies(
+                path, content, relative_path,
+                max_records=max(0, remaining_dependencies),
+            )
+            if len(extracted_dependencies) > remaining_dependencies:
+                dependency_inventory.extend(extracted_dependencies[:remaining_dependencies])
+                dependency_inventory_truncated = True
+            else:
+                dependency_inventory.extend(extracted_dependencies)
         file_findings: list[RepositoryFinding] = []
         for line_number, line in enumerate(content.splitlines(), start=1):
             file_findings.extend(_analyse_line(path, relative_path, line_number, line))
@@ -633,14 +661,16 @@ def analyse_repository(
         repository=root.name, scanner_version="0.2.0", findings=findings,
         dependency_inventory=dependency_inventory,
         files_scanned=files_scanned, bytes_scanned=bytes_scanned,
-        skipped_files=skipped_files, truncated=truncated,
+        skipped_files=skipped_files, truncated=truncated or dependency_inventory_truncated,
         limitations=[
             "Python dangerous-call checks use AST; cross-language/configuration checks are lexical and line-based. No control-flow, data-flow, or reachability analysis is performed.",
             "Findings are suspected indicators, not validated vulnerabilities.",
             "No repository code is executed and no network requests are made.",
             "Dependency manifests and lockfiles are inventoried, but no advisory database is queried and no vulnerable-version conclusion is made.",
             "Coverage is limited to supported source/configuration types and bounded scan budgets.",
+            "Dependency inventory is capped at 5,000 records; the report marks when additional records may have been omitted.",
         ],
+        dependency_inventory_truncated=dependency_inventory_truncated,
     )
 
 
