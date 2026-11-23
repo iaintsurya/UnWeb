@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit, urlunsplit, urldefrag
 
 from .models import ScanResult
+from .finding_schema import website_security_findings
 from .url_policy import normalize_url, validate_resolved_addresses, URLRejected
 from .engines import analyze_html, analyze_security, analyze_javascript
 
@@ -327,12 +328,13 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         if source in scanned_page_urls and target in scanned_page_urls
     ]
 
+    scanned_at = datetime.now(timezone.utc).isoformat()
     return ScanResult(
         id=str(uuid.uuid4()),
         requested_url=start,
         final_url=final_url,
         status_code=status,
-        scanned_at=datetime.now(timezone.utc).isoformat(),
+        scanned_at=scanned_at,
         title=page.title,
         description=page.metadata.get("description") or page.metadata.get("og:description"),
         headers=_public_response_headers(headers),
@@ -342,6 +344,9 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         pages=pages,
         edges=[{"source": source, "target": target} for source, target in edges],
         findings=findings,
+        security_findings=website_security_findings(
+            findings, final_url, scanner_version="0.2.0", observed_at=scanned_at
+        ),
         js_analysis=js,
         notes=[
             "Only public responses and delivered assets were inspected.",
