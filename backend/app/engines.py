@@ -325,7 +325,7 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
         "source_map_references": source_maps,
         "method": "comment-aware lexical heuristics",
         "limitations": (
-            "Not AST analysis: string paths, framework markers, and source-map comments "
+            "Not AST analysis: these lexical heuristics inspect string paths, framework markers, and source-map comments "
             "are evidence clues only. They do not prove a route is reachable, a library "
             "is active, or a source map is publicly available."
         ),
