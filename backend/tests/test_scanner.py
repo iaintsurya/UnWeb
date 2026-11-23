@@ -216,3 +216,34 @@ def test_pinned_request_handles_ipv6_literal():
 def test_pinned_request_rejects_invalid_resolved_address():
     with pytest.raises(scanner.URLRejected, match="invalid address"):
         scanner._pinned_request("https://example.com/", "not-an-ip")
+
+
+
+def test_scan_result_redacts_set_cookie_values_from_persistable_headers(monkeypatch):
+    import json
+
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+        return (
+            url,
+            200,
+            {
+                "content-type": "text/html",
+                "set-cookie": "sessionid=top-secret-value; Path=/; SameSite=None",
+            },
+            html_page("Home"),
+        )
+
+    monkeypatch.setattr(scanner, "safe_fetch", fake_safe_fetch)
+    result = asyncio.run(
+        scanner.scan_site(
+            "https://example.com",
+            max_pages=1,
+            include_reconstruction=False,
+        )
+    )
+
+    assert "set-cookie" not in result.headers
+    serialized = json.dumps(result.model_dump())
+    assert "top-secret-value" not in serialized
+    assert "sessionid" in serialized
+    assert any(item.id == "cookie-sessionid-missing-secure" for item in result.findings)
