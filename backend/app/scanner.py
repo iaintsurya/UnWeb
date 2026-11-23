@@ -46,7 +46,11 @@ def _is_html(headers: dict[str, str]) -> bool:
     return not media_type or media_type in {"text/html", "application/xhtml+xml"}
 
 
-async def safe_fetch(url: str, max_bytes: int = MAX_HTML):
+async def safe_fetch(
+    url: str,
+    max_bytes: int = MAX_HTML,
+    allowed_origin: tuple[str, str, int] | None = None,
+):
     current = normalize_url(url)
     for hop in range(MAX_REDIRECTS + 1):
         validate_resolved_addresses(current)
@@ -63,7 +67,10 @@ async def safe_fetch(url: str, max_bytes: int = MAX_HTML):
                         return current, response.status_code, dict(response.headers), b""
                     if hop >= MAX_REDIRECTS:
                         raise URLRejected("Too many redirects.")
-                    current = normalize_url(urljoin(current, location))
+                    redirect_url = normalize_url(urljoin(current, location))
+                    if allowed_origin is not None and not _same_origin(redirect_url, allowed_origin):
+                        raise URLRejected("Redirect left the original site origin.")
+                    current = redirect_url
                     continue
 
                 chunks = []
@@ -125,7 +132,9 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         visited.add(requested_url)
 
         try:
-            fetched_url, page_status, page_headers, page_body = await safe_fetch(requested_url)
+            fetched_url, page_status, page_headers, page_body = await safe_fetch(
+                requested_url, allowed_origin=origin
+            )
         except (URLRejected, httpx.HTTPError, OSError):
             continue
 
@@ -157,7 +166,9 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         if not _same_origin(script_url, origin):
             continue
         try:
-            fetched_script_url, _, _, script = await safe_fetch(script_url, MAX_SCRIPT)
+            fetched_script_url, _, _, script = await safe_fetch(
+                script_url, MAX_SCRIPT, allowed_origin=origin
+            )
             if not _same_origin(fetched_script_url, origin):
                 raise URLRejected("Script redirected outside the target origin.")
             js.append(
@@ -176,6 +187,12 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
     if include_reconstruction:
         from .rebuild import make_reconstruction
         reconstruction = make_reconstruction(final_url, html)
+
+    scanned_page_urls = {scanned_page.url for scanned_page in pages}
+    edges = [
+        (source, target) for source, target in edges
+        if source in scanned_page_urls and target in scanned_page_urls
+    ]
 
     return ScanResult(
         id=str(uuid.uuid4()),
