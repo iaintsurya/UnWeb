@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 import io
 import json
 import zipfile
+from pathlib import Path
 
 from app import database, main
 from app.limits import SlidingWindowLimiter
@@ -191,3 +192,60 @@ def test_repository_scan_api_rate_limits_uploads(monkeypatch):
     assert second.status_code == 429
     assert second.headers["retry-after"]
     assert second.json()["detail"]["code"] == "repository_scan_rate_limited"
+
+
+def test_github_repository_scan_requires_explicit_authorisation():
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/github-repository-scans",
+            json={"repository_url": "https://github.com/owner/repo"},
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "repository_authorisation_required"
+
+
+def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkeypatch):
+    async def fake_fetch(repository_url, ref, destination):
+        Path(destination).write_bytes(make_repository_zip())
+        return {
+            "provider": "github",
+            "full_name": "owner/repo",
+            "requested_ref": ref or "main",
+            "default_branch": "main",
+            "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+            "archive_bytes": len(make_repository_zip()),
+        }
+
+    from pathlib import Path
+    monkeypatch.setattr(main, "fetch_github_repository_archive", fake_fetch)
+    monkeypatch.setattr(main, "REPOSITORY_SCAN_LIMITER", SlidingWindowLimiter(5, 60))
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/github-repository-scans",
+            json={
+                "repository_url": "https://github.com/owner/repo",
+                "ref": "main",
+                "authorised": True,
+            },
+        )
+
+    assert response.status_code == 200
+    report = response.json()
+    assert report["repository"] == "owner/repo"
+    assert report["source"]["commit_sha"] == "0123456789abcdef0123456789abcdef01234567"
+    assert report["source"]["requested_ref"] == "main"
+    assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
+    assert "repository-secret-value-123" not in response.text
+
+
+def test_github_repository_scan_rejects_invalid_repository_url():
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/github-repository-scans",
+            json={
+                "repository_url": "https://github.com.evil.test/owner/repo",
+                "authorised": True,
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_github_repository_url"
