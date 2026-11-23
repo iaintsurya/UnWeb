@@ -100,45 +100,60 @@ async def safe_fetch(
 ):
     current = normalize_url(url)
     for hop in range(MAX_REDIRECTS + 1):
-        # Resolve and validate once, then connect to that exact IP literal.
-        # HTTPX never performs a second DNS lookup for this request.
+        # Resolve and validate once, then connect to each validated IP literal
+        # in turn. HTTPX never performs another DNS lookup for these requests.
         addresses = await asyncio.to_thread(validate_resolved_addresses, current)
-        pinned_url, host_header, extensions = _pinned_request(current, addresses[0])
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT,
-            follow_redirects=False,
-            trust_env=False,
-        ) as client:
-            async with client.stream(
-                "GET",
-                pinned_url,
-                headers={
-                    "User-Agent": UA,
-                    "Accept": "text/html,*/*;q=0.5",
-                    "Host": host_header,
-                },
-                extensions=extensions,
-            ) as response:
-                if response.status_code in {301, 302, 303, 307, 308}:
-                    location = response.headers.get("location")
-                    if not location:
-                        return current, response.status_code, dict(response.headers), b""
-                    if hop >= MAX_REDIRECTS:
-                        raise URLRejected("Too many redirects.")
-                    redirect_url = normalize_url(urljoin(current, location))
-                    if allowed_origin is not None and not _same_origin(redirect_url, allowed_origin):
-                        raise URLRejected("Redirect left the original site origin.")
-                    current = redirect_url
-                    continue
+        last_connect_error = None
+        redirected = False
 
-                chunks = []
-                total = 0
-                async for chunk in response.aiter_bytes():
-                    total += len(chunk)
-                    if total > max_bytes:
-                        raise URLRejected(f"Response exceeded the {max_bytes} byte limit.")
-                    chunks.append(chunk)
-                return current, response.status_code, dict(response.headers), b"".join(chunks)
+        for address in addresses:
+            pinned_url, host_header, extensions = _pinned_request(current, address)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=TIMEOUT,
+                    follow_redirects=False,
+                    trust_env=False,
+                ) as client:
+                    async with client.stream(
+                        "GET",
+                        pinned_url,
+                        headers={
+                            "User-Agent": UA,
+                            "Accept": "text/html,*/*;q=0.5",
+                            "Host": host_header,
+                        },
+                        extensions=extensions,
+                    ) as response:
+                        if response.status_code in {301, 302, 303, 307, 308}:
+                            location = response.headers.get("location")
+                            if not location:
+                                return current, response.status_code, dict(response.headers), b""
+                            if hop >= MAX_REDIRECTS:
+                                raise URLRejected("Too many redirects.")
+                            redirect_url = normalize_url(urljoin(current, location))
+                            if allowed_origin is not None and not _same_origin(redirect_url, allowed_origin):
+                                raise URLRejected("Redirect left the original site origin.")
+                            current = redirect_url
+                            redirected = True
+                            break
+
+                        chunks = []
+                        total = 0
+                        async for chunk in response.aiter_bytes():
+                            total += len(chunk)
+                            if total > max_bytes:
+                                raise URLRejected(f"Response exceeded the {max_bytes} byte limit.")
+                            chunks.append(chunk)
+                        return current, response.status_code, dict(response.headers), b"".join(chunks)
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                last_connect_error = exc
+                continue
+
+        if redirected:
+            continue
+        if last_connect_error is not None:
+            raise last_connect_error
+        raise URLRejected("Hostname resolved to no usable addresses.")
 
     raise URLRejected("Too many redirects.")
 
