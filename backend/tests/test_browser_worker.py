@@ -58,8 +58,8 @@ def test_proxy_is_bound_to_loopback_and_denies_other_origins(monkeypatch):
             "127.0.0.1", int(proxy_url.rsplit(":", 1)[1])
         )
         writer.write(
-            b"CONNECT 127.0.0.1:443 HTTP/1.1\\r\\n"
-            b"Host: 127.0.0.1:443\\r\\n\\r\\n"
+            b"CONNECT 127.0.0.1:443 HTTP/1.1" + bytes([13, 10])
+            + b"Host: 127.0.0.1:443" + bytes([13, 10, 13, 10])
         )
         await writer.drain()
         response = await asyncio.wait_for(reader.read(), timeout=2)
@@ -211,6 +211,7 @@ def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch)
             return False
 
     playwright_package = types.ModuleType("playwright")
+    playwright_package.__path__ = []
     playwright_api = types.ModuleType("playwright.async_api")
     playwright_api.async_playwright = lambda: FakePlaywrightManager()
     monkeypatch.setitem(sys.modules, "playwright", playwright_package)
