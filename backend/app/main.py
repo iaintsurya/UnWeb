@@ -1,11 +1,13 @@
 import asyncio
+import os
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import database
 from .models import ScanRequest, ScanResult
+from .limits import SlidingWindowLimiter
 from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
 
@@ -14,17 +16,24 @@ app = FastAPI(
     version="0.2.0",
     description="Bounded passive website intelligence.",
 )
+DEFAULT_CORS_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("UNWEB_CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
 
-# Keep resource use bounded in the preview server. Public deployments also
-# need network-level egress rules, authentication, and per-user rate limits.
+# Keep resource use bounded in the preview server. The in-process limiter is
+# a local abuse guard, not a substitute for shared, identity-aware production controls.
 SCAN_SEMAPHORE = asyncio.Semaphore(2)
+SCAN_RATE_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 SCAN_QUEUE_TIMEOUT = 0.5
 SCAN_TIMEOUT_SECONDS = 120
 
@@ -47,7 +56,19 @@ async def health():
 
 
 @app.post("/api/scans", response_model=ScanResult)
-async def create_scan(payload: ScanRequest):
+async def create_scan(payload: ScanRequest, request: Request):
+    client_key = request.client.host if request.client else "unknown"
+    retry_after = SCAN_RATE_LIMITER.check(client_key)
+    if retry_after:
+        raise HTTPException(
+            429,
+            detail={
+                "code": "scan_rate_limited",
+                "message": "Too many scans from this network address. Try again shortly.",
+            },
+            headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
+        )
+
     acquired = False
     try:
         try:
