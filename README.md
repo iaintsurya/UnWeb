@@ -60,7 +60,7 @@ The Vite development server proxies `/api` requests to the local FastAPI server.
 
 Scan results are saved to a local SQLite database at `backend/data/unweb.sqlite3`. The database is created automatically at backend startup and is excluded from Git. The application retains the newest 250 scan records by default.
 
-Set `UNWEB_DB_PATH` in the backend process environment to use a different database file. Back up this file if scan history matters. This single-file SQLite setup is intended for local development and a single backend instance, not horizontally scaled public deployment.
+Set `UNWEB_DB_PATH` in the backend process environment to use a different database file. Set `UNWEB_CORS_ORIGINS` to a comma-separated list of trusted frontend origins for a deployed frontend; do not use a wildcard for a public service. Back up the database file if scan history matters. This single-file SQLite setup is intended for local development and a single backend instance, not horizontally scaled public deployment.
 
 ## API
 
@@ -95,7 +95,7 @@ Automated tests use local fixtures and mocked network responses. They do not sca
 
 UnWeb restricts URL schemes to HTTP(S), rejects non-global IP destinations, resolves and validates hostnames, then connects to the validated IP literal while preserving the original HTTP Host header and TLS SNI/certificate identity. It revalidates every redirect, disables ambient proxy configuration, caps response bytes and timeouts, bounds page/script counts, and rejects explicitly non-HTML page responses. DNS resolution runs off the async event loop. The crawler follows same-origin links breadth-first up to the requested page limit; its sitemap graph contains only observed links between successfully scanned HTML pages. Assets and bounded JavaScript clues are collected across discovered pages.
 
-The preview API allows at most two active scans per process and applies a 120-second scan time limit. These are basic resource controls, not a replacement for per-user authentication or rate limits. The IP-pinned fetch path narrows the DNS-rebinding/time-of-check-to-time-of-use risk, but the application is still not a complete SSRF boundary; retain network-level egress controls in any public deployment.
+The preview API allows at most two active scans per process, applies a 120-second scan time limit, and permits 10 scan submissions per minute per direct peer IP in each process. These are basic abuse controls, not a replacement for authentication or shared per-user rate limits. Set `UNWEB_CORS_ORIGINS` to a comma-separated allowlist of frontend origins when hosting the API separately. The IP-pinned fetch path narrows the DNS-rebinding/time-of-check-to-time-of-use risk, but the application is still not a complete SSRF boundary; retain network-level egress controls in any public deployment.
 
 **Important:** application-level DNS checks do not fully eliminate DNS rebinding or time-of-check/time-of-use risks. Before any public deployment, enforce outbound network filtering outside the app, isolate scan workers, set CPU/memory/concurrency limits, add authentication and rate limits, and conduct a security review. The local SQLite store is not designed for multi-instance deployment.
 
