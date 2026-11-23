@@ -17,3 +17,25 @@ def test_js_heuristics():
     assert "/api/products" in result["routes"]
     assert result["source_mapping_url_reference"]
     assert "heuristics" in result["limitations"]
+
+
+
+def test_hsts_and_framing_checks_are_context_aware():
+    https_findings = analyze_security(
+        {"content-security-policy": "default-src 'self'; frame-ancestors 'none'"},
+        "https://example.com/",
+    )
+    https_ids = {finding.id for finding in https_findings}
+    assert "missing-strict-transport-security" in https_ids
+    assert "missing-framing-protection" not in https_ids
+
+    protected_findings = analyze_security(
+        {
+            "strict-transport-security": "max-age=31536000",
+            "x-frame-options": "DENY",
+        },
+        "https://example.com/",
+    )
+    protected_ids = {finding.id for finding in protected_findings}
+    assert "missing-strict-transport-security" not in protected_ids
+    assert "missing-framing-protection" not in protected_ids
