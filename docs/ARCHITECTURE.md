@@ -23,7 +23,7 @@ The preview uses the Python standard library's SQLite driver. Scan payloads are 
 
 ## Security boundary
 
-URL policy checks are defence in depth, not a complete SSRF boundary. DNS is checked before a request, but the HTTP client's subsequent resolution can differ (DNS rebinding / time-of-check-to-time-of-use). Public deployments must use network-level egress controls or a resolver/transport that pins validated addresses through connection establishment. Do not expose this preview API publicly until that boundary is independently verified.
+URL policy checks are defence in depth, not a complete SSRF boundary. The current fetcher resolves and validates the host once per hop, then connects to the validated IP literal while preserving the original Host header and TLS SNI/certificate hostname. This avoids a separate HTTP-client DNS lookup between validation and connection for that request. Keep this behavior covered by tests against the pinned HTTPX version. Public deployments still require network-level egress controls, isolated workers, and an independent security review; do not expose the preview API publicly until those controls are in place.
 
 Production also needs an authenticated API, per-user rate limits, durable background jobs, isolated unprivileged workers, CPU/memory/wall-clock limits, audit logs, evidence retention policy, and security review. Browser automation should run in disposable workers with explicit network policy rather than in the API process.
 
