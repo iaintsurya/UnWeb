@@ -1,3 +1,8 @@
+import asyncio
+
+from app import scanner
+
+
 def test_safe_fetch_falls_back_to_another_validated_ip(monkeypatch):
     requested_urls = []
 
