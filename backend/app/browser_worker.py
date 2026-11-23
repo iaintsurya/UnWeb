@@ -274,7 +274,7 @@ class TargetConnectProxy:
         except (URLRejected, UnicodeError, ValueError):
             self.denied_count += 1
             await self._reply(writer, "403 Forbidden")
-        except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError):
+        except (OSError, asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
             await self._reply(writer, "502 Bad Gateway")
         finally:
             if upstream_writer is not None:
