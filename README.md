@@ -140,7 +140,7 @@ This is a single unauthenticated render: it does not submit forms, bypass access
 
 ## Local repository analysis preview
 
-UnWeb also includes an early **read-only static analysis CLI** for a local repository checkout. It checks selected source and configuration files for credential-like assignments, common provider-token shapes, private-key markers, dynamic evaluation, risky process/deserialization calls, disabled TLS verification, and wildcard CORS configuration.
+UnWeb also includes an early **read-only static analysis CLI** for a local repository checkout. It checks selected source and configuration files for credential-like assignments, common provider-token shapes, private-key markers, dynamic evaluation, risky process/deserialization calls, disabled TLS verification, wildcard CORS configuration, and dependency inventory from npm, Python, Cargo, and Go manifests/lockfiles.
 
 Run it from the backend directory:
 
@@ -149,9 +149,9 @@ cd backend
 python -m app.repository_analysis /path/to/local/checkout
 ```
 
-The CLI emits JSON. Default limits are 1,500 files, 1 MB per file, 20 MB total input, and 500 findings. It skips common dependency/build/VCS directories and symbolic links; detected secret values are redacted from evidence. It does not execute repository code, install dependencies, contact GitHub, query vulnerability databases, or make network requests. Dependency inventory is not an advisory scan and does not establish whether a package version is vulnerable.
+The CLI emits JSON. Default limits are 1,500 files, 1 MB per file, 20 MB total input, and 500 findings. It skips common dependency/build/VCS directories and symbolic links; detected secret values are redacted from evidence. It records declared constraints and lockfile-resolved versions where supported, but does not execute repository code, install dependencies, contact GitHub, query vulnerability databases, or make network requests. Dependency inventory is not an advisory scan and does not establish whether a package version is vulnerable.
 
-This is an initial prototype: Python dangerous-call checks use the standard-library AST, while cross-language/configuration rules are lexical and line-based. It is not CodeQL, Semgrep, dependency auditing, data-flow/reachability analysis, or a complete SAST product. Results are labelled **suspected** and need human review. It is currently a local CLI, not connected to the API, dashboard, or GitHub App. Only analyse repositories you own or are authorised to assess.
+This is an initial prototype: Python dangerous-call checks use the standard-library AST, while cross-language/configuration rules are lexical and line-based. It is not CodeQL, Semgrep, dependency vulnerability auditing, data-flow/reachability analysis, or a complete SAST product. Results are labelled **suspected** and need human review. It is currently a local CLI, not connected to the API, dashboard, or GitHub App. Only analyse repositories you own or are authorised to assess.
 
 ## Tests
 
@@ -185,7 +185,7 @@ UnWeb does not bypass authentication, CAPTCHAs, access controls, or rate limits.
 |---|---|
 | v0.1 Preview | Safe URL intake, bounded fetch, metadata, initial fingerprints and UI |
 | v0.2 Foundation | Recursive bounded crawl, observed sitemap edges, SQLite history, cross-page asset/script inventory, scan capacity limits, frontend API helper, tests and CI |
-| v0.3 Security preview | Passive cookie-attribute checks with value redaction; local read-only repository-analysis CLI with Python AST and lexical checks, bounded inputs, suspected findings and regression tests |
+| v0.3 Security preview | Passive cookie-attribute checks with value redaction; local read-only repository-analysis CLI with Python AST and lexical checks, supported dependency manifest/lockfile inventory, bounded inputs, suspected findings and regression tests |
 | v1.0 Hardening | Explicit authorisation/scope enforcement, authentication, shared per-user rate limits, durable isolated workers, independent SSRF review, evidence/audit controls, and safe authenticated GitHub repository ingestion |
 | v2.0 Advanced | Cross-source website/API-to-repository correlation, deeper language-aware and dependency analysis, integrated isolated Playwright jobs, progress events, multi-user storage and CLI/CI assessment workflows |
 
