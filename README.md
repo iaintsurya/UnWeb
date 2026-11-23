@@ -107,7 +107,7 @@ UnWeb does not bypass authentication, CAPTCHAs, access controls, or rate limits.
 |---|---|
 | v0.1 Preview | Safe URL intake, bounded fetch, metadata, initial fingerprints and UI |
 | v0.2 Foundation | Recursive bounded crawl, observed sitemap edges, SQLite history, cross-page asset/script inventory, scan capacity limits, frontend API helper, tests and CI |
-| v1.0 Hardening | Connection-time DNS pinning/egress enforcement, authentication, per-user rate limits, durable job workers, richer JavaScript analysis, audit retention and deeper tests |
+| v1.0 Hardening | Network-level egress enforcement and independent SSRF review, authentication, shared per-user rate limits, durable job workers, richer JavaScript analysis, audit retention and deeper tests |
 | v2.0 Advanced | Disposable Playwright workers, observed network requests, DOM/style inspector, improved reconstruction, progress events, multi-user storage and CLI |
 
 ## AI and human collaboration
