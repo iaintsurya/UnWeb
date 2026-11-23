@@ -6,6 +6,8 @@ UnWeb is being built to help website owners and defenders discover attack surfac
 
 **Core workflow:** define authorised scope → map the attack surface → run bounded security checks → validate findings safely → explain impact and evidence → recommend fixes → retest.
 
+See [docs/SECURITY_ASSESSMENT.md](docs/SECURITY_ASSESSMENT.md) for the finding states, minimum evidence model, initial coverage catalogue, and safe validation policy.
+
 > Early engineering preview — not production-ready. Use only on sites you own or are explicitly authorised to analyse.
 
 ## Security assessment model
