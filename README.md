@@ -11,6 +11,7 @@ UnWeb gathers bounded, publicly observable website evidence; extracts metadata a
 - Frontend: React, TypeScript, Vite 8, Lucide icons, custom CSS
 - Backend: Python 3.11+, FastAPI, HTTPX, Beautiful Soup, Pydantic
 - Persistence: SQLite scan history (last 250 results by default)
+- Optional browser worker: Playwright Python with pinned Chromium
 - Tests: pytest, Vitest, and GitHub Actions CI
 
 ## Requirements
@@ -27,8 +28,8 @@ UnWeb gathers bounded, publicly observable website evidence; extracts metadata a
 # Terminal 1 — backend
 cd backend
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt
+.\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 # Terminal 2 — frontend, from the repository root
 cd frontend
@@ -75,6 +76,39 @@ Set `UNWEB_DB_PATH` in the backend process environment to use a different databa
 
 The scan request accepts `max_pages` from 1 to 30. The UI offers 4, 8, 12, 20, and 30 page presets.
 
+## Optional Playwright browser worker
+
+The browser engine is intentionally **not** part of the FastAPI scan endpoint. It is a separate, one-target CLI that renders one HTTPS page in a fresh Chromium process and records bounded DOM/style evidence, request/response metadata, failed-request counts, WebSocket endpoints, and browser error counts. It does not log query strings, request headers, cookies, or request bodies.
+
+Build the optional non-root worker image from the repository root:
+
+```bash
+docker build -f Dockerfile.browser-worker -t unweb-browser-worker .
+```
+
+Run it only on a disposable Docker network with an external per-job egress policy:
+
+```bash
+docker run --rm \
+  --network <your-policy-controlled-network> \
+  --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m \
+  --memory=1g --cpus=1 --pids-limit=128 \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  unweb-browser-worker \
+  --url https://example.com/ \
+  --max-requests 80 \
+  --confirm-isolated-egress
+```
+
+The network name above is a placeholder, not a network created by this repository. Configure it outside UnWeb so each job can reach only the validated public IP address(es) for its target over the target HTTPS port, plus a trusted DNS resolver; explicitly deny loopback, private, link-local, multicast, IPv6 ULA, cloud metadata, and all other destinations. A normal Docker bridge network is **not** sufficient. The image runs as UID 10001, uses Chromium's sandbox, and does not add `--no-sandbox`. The host must support Chromium sandboxing; otherwise the worker should fail rather than silently disable it.
+
+The `--confirm-isolated-egress` flag is an operator acknowledgement only. It does not install, inspect, or enforce firewall rules. The worker's loopback-only CONNECT proxy re-resolves and validates every tunnel, pins the connection to a validated public IP literal, and permits only the exact target host and port. Playwright request routing is an additional guard; neither it nor the proxy replaces the external firewall, because browser processes must be treated as untrusted. The worker has a 45-second wall-clock limit and a request-count cap, but declared response lengths are informational rather than a hard transfer cap; enforce memory, CPU, and process limits at the container/runtime layer.
+
+Install locally for development with `cd backend && pip install -r requirements-browser.txt && python -m playwright install chromium`, but do not run the browser worker directly on a machine or network that lacks the external egress controls above. The feature is optional; the standard API and CI do not install browser binaries or depend on Playwright.
+
+This is a single unauthenticated render: it does not submit forms, bypass access controls, reuse your browser profile, or crawl links. Browser output is not yet persisted or shown in the web UI; durable isolated job orchestration is required before API integration.
+
 ## Tests
 
 ```bash
@@ -89,7 +123,7 @@ npm run build
 npm test
 ```
 
-Automated tests use local fixtures and mocked network responses. They do not scan third-party websites.
+Automated tests use local fixtures and mocked network responses. They do not scan third-party websites or launch a browser.
 
 ## Safety and limits
 
@@ -108,7 +142,7 @@ UnWeb does not bypass authentication, CAPTCHAs, access controls, or rate limits.
 | v0.1 Preview | Safe URL intake, bounded fetch, metadata, initial fingerprints and UI |
 | v0.2 Foundation | Recursive bounded crawl, observed sitemap edges, SQLite history, cross-page asset/script inventory, scan capacity limits, frontend API helper, tests and CI |
 | v1.0 Hardening | Network-level egress enforcement and independent SSRF review, authentication, shared per-user rate limits, durable job workers, richer JavaScript analysis, audit retention and deeper tests |
-| v2.0 Advanced | Disposable Playwright workers, observed network requests, DOM/style inspector, improved reconstruction, progress events, multi-user storage and CLI |
+| v2.0 Advanced | Integrated isolated Playwright jobs, observed network requests, DOM/style inspector, improved reconstruction, progress events, multi-user storage and CLI/CI scan mode |
 
 ## AI and human collaboration
 
