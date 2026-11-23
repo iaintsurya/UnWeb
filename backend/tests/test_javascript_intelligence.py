@@ -66,3 +66,14 @@ def test_js_analysis_reports_basic_size_and_limitations():
     assert result["bytes_analyzed"] == len(body.encode("utf-8"))
     assert result["line_count"] == 2
     assert "Not AST analysis" in result["limitations"]
+
+
+def test_library_markers_in_comments_are_ignored():
+    body = """// React.createElement
+/* createApp({}); @angular/core */
+const actual = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+"""
+    result = analyze_javascript("https://example.com/app.js", body)
+
+    assert result["possible_libraries"] == ["React"]
+    assert result["library_evidence"][0]["line"] == 3
