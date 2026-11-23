@@ -42,7 +42,7 @@ def test_detects_security_indicators_without_exposing_secret_values(tmp_path):
     } <= ids
     rendered = json.dumps(report.to_dict())
     assert "genuinely-secret-value-123" not in rendered
-    assert "[REDACTED]" in rendered
+    assert "value has been redacted" in rendered
 
 
 def test_detects_provider_tokens_and_private_key_marker_without_values(tmp_path):
