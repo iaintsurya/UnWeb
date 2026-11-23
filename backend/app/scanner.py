@@ -1,6 +1,10 @@
-import uuid, httpx, re
+import uuid
+import httpx
+import re
+from collections import deque
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit, urldefrag
+
 from .models import ScanResult
 from .url_policy import normalize_url, validate_resolved_addresses, URLRejected
 from .engines import analyze_html, analyze_security, analyze_javascript
@@ -11,72 +15,189 @@ TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 MAX_REDIRECTS = 5
 UA = "UnWeb/0.1 (authorised passive analysis)"
 
+
+class UnsupportedContentType(ValueError):
+    """Raised when the requested target is not an HTML document."""
+
+
+def _origin(url: str) -> tuple[str, str, int]:
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    host = (parts.hostname or "").rstrip(".").lower()
+    port = parts.port or (443 if scheme == "https" else 80)
+    return scheme, host, port
+
+
+def _same_origin(url: str, origin: tuple[str, str, int]) -> bool:
+    try:
+        return _origin(url) == origin
+    except ValueError:
+        return False
+
+
+def _is_html(headers: dict[str, str]) -> bool:
+    content_type = next(
+        (value for key, value in headers.items() if key.lower() == "content-type"),
+        "",
+    )
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    # Some servers omit Content-Type. Preserve the previous HTML fallback in
+    # that case, but never parse a response explicitly labelled as another type.
+    return not media_type or media_type in {"text/html", "application/xhtml+xml"}
+
+
 async def safe_fetch(url: str, max_bytes: int = MAX_HTML):
     current = normalize_url(url)
     for hop in range(MAX_REDIRECTS + 1):
         validate_resolved_addresses(current)
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False, trust_env=False,
-                                     headers={"User-Agent":UA,"Accept":"text/html,*/*;q=0.5"}) as client:
+        async with httpx.AsyncClient(
+            timeout=TIMEOUT,
+            follow_redirects=False,
+            trust_env=False,
+            headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.5"},
+        ) as client:
             async with client.stream("GET", current) as response:
-                if response.status_code in {301,302,303,307,308}:
+                if response.status_code in {301, 302, 303, 307, 308}:
                     location = response.headers.get("location")
-                    if not location: return current,response.status_code,dict(response.headers),b""
-                    if hop >= MAX_REDIRECTS: raise URLRejected("Too many redirects.")
-                    current = normalize_url(urljoin(current,location))
+                    if not location:
+                        return current, response.status_code, dict(response.headers), b""
+                    if hop >= MAX_REDIRECTS:
+                        raise URLRejected("Too many redirects.")
+                    current = normalize_url(urljoin(current, location))
                     continue
-                chunks=[]; total=0
+
+                chunks = []
+                total = 0
                 async for chunk in response.aiter_bytes():
                     total += len(chunk)
-                    if total > max_bytes: raise URLRejected(f"Response exceeded the {max_bytes} byte limit.")
+                    if total > max_bytes:
+                        raise URLRejected(f"Response exceeded the {max_bytes} byte limit.")
                     chunks.append(chunk)
-                return str(response.url),response.status_code,dict(response.headers),b"".join(chunks)
+                return str(response.url), response.status_code, dict(response.headers), b"".join(chunks)
+
     raise URLRejected("Too many redirects.")
+
 
 async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bool = True):
     start = normalize_url(raw_url)
-    final_url,status,headers,body = await safe_fetch(start)
-    html = body.decode("utf-8",errors="replace")
-    page,assets,tech = analyze_html(final_url,html)
+    final_url, status, headers, body = await safe_fetch(start)
+    if not _is_html(headers):
+        raise UnsupportedContentType("The target returned a non-HTML response. UnWeb analyses HTML pages.")
+
+    html = body.decode("utf-8", errors="replace")
+    page, assets, tech = analyze_html(final_url, html)
     page.status_code = status
-    findings = analyze_security(headers,final_url)
-    pages=[page]; visited={urldefrag(final_url)[0]}
-    p=urlsplit(final_url); origin=(p.scheme,p.hostname,p.port)
-    queue=[]
-    for link in page.links:
-        lp=urlsplit(link)
-        if (lp.scheme,lp.hostname,lp.port)==origin and urldefrag(link)[0] not in visited:
-            queue.append(urldefrag(link)[0])
-    queue=list(dict.fromkeys(queue))
-    js=[]
-    for script_url in page.scripts[:20]:
-        sp=urlsplit(script_url)
-        if (sp.scheme,sp.hostname,sp.port)!=origin: continue
-        try:
-            _,_,_,script=await safe_fetch(script_url,MAX_SCRIPT)
-            js.append(analyze_javascript(script_url,script.decode("utf-8",errors="replace")))
-        except (URLRejected,httpx.HTTPError,OSError):
-            js.append({"url":script_url,"error":"Script could not be safely fetched or analysed."})
-    for next_url in queue:
-        if len(pages)>=max_pages: break
-        if next_url in visited: continue
-        visited.add(next_url)
-        try:
-            fu,sc,hd,b=await safe_fetch(next_url)
-            ct=next((v for k,v in hd.items() if k.lower()=="content-type"),"text/html")
-            if "html" not in ct.lower(): continue
-            pg,_,_=analyze_html(fu,b.decode("utf-8",errors="replace")); pg.status_code=sc; pages.append(pg)
-        except (URLRejected,httpx.HTTPError,OSError):
+    findings = analyze_security(headers, final_url)
+
+    pages = [page]
+    origin = _origin(final_url)
+    visited = {urldefrag(final_url)[0]}
+    queued = set()
+    queue = deque()
+    edges: list[tuple[str, str]] = []
+    seen_edges: set[tuple[str, str]] = set()
+
+    def discover_links(source_page):
+        source_url = urldefrag(source_page.url)[0]
+        for link in source_page.links:
+            target_url = urldefrag(link)[0]
+            if not _same_origin(target_url, origin):
+                continue
+
+            edge = (source_url, target_url)
+            if edge not in seen_edges:
+                seen_edges.add(edge)
+                edges.append(edge)
+
+            if target_url not in visited and target_url not in queued:
+                queued.add(target_url)
+                queue.append(target_url)
+
+    # Breadth-first discovery: pages found on each successfully fetched page
+    # are added to the queue, while visited/queued sets prevent repeat requests.
+    discover_links(page)
+
+    while queue and len(pages) < max_pages:
+        requested_url = queue.popleft()
+        queued.discard(requested_url)
+        if requested_url in visited:
             continue
-    reconstruction=None
+        visited.add(requested_url)
+
+        try:
+            fetched_url, page_status, page_headers, page_body = await safe_fetch(requested_url)
+        except (URLRejected, httpx.HTTPError, OSError):
+            continue
+
+        # The starting page defines the crawl boundary. Do not follow a
+        # same-origin link to a different host through a redirect.
+        if not _same_origin(fetched_url, origin) or not _is_html(page_headers):
+            continue
+
+        final_page_url = urldefrag(fetched_url)[0]
+        if final_page_url != requested_url:
+            edges = [
+                (source, final_page_url if target == requested_url else target)
+                for source, target in edges
+            ]
+            seen_edges = set(edges)
+            visited.add(final_page_url)
+
+        if any(existing.url == fetched_url for existing in pages):
+            continue
+
+        page_html = page_body.decode("utf-8", errors="replace")
+        discovered_page, _, _ = analyze_html(fetched_url, page_html)
+        discovered_page.status_code = page_status
+        pages.append(discovered_page)
+        discover_links(discovered_page)
+
+    js = []
+    for script_url in page.scripts[:20]:
+        if not _same_origin(script_url, origin):
+            continue
+        try:
+            fetched_script_url, _, _, script = await safe_fetch(script_url, MAX_SCRIPT)
+            if not _same_origin(fetched_script_url, origin):
+                raise URLRejected("Script redirected outside the target origin.")
+            js.append(
+                analyze_javascript(
+                    fetched_script_url,
+                    script.decode("utf-8", errors="replace"),
+                )
+            )
+        except (URLRejected, httpx.HTTPError, OSError):
+            js.append({
+                "url": script_url,
+                "error": "Script could not be safely fetched or analysed.",
+            })
+
+    reconstruction = None
     if include_reconstruction:
         from .rebuild import make_reconstruction
-        reconstruction=make_reconstruction(final_url,html)
-    return ScanResult(id=str(uuid.uuid4()),requested_url=start,final_url=final_url,status_code=status,
-        scanned_at=datetime.now(timezone.utc).isoformat(),title=page.title,
+        reconstruction = make_reconstruction(final_url, html)
+
+    return ScanResult(
+        id=str(uuid.uuid4()),
+        requested_url=start,
+        final_url=final_url,
+        status_code=status,
+        scanned_at=datetime.now(timezone.utc).isoformat(),
+        title=page.title,
         description=page.metadata.get("description") or page.metadata.get("og:description"),
-        headers={k.lower():v for k,v in headers.items()},technologies=tech,assets=assets,page=page,
-        pages=pages,findings=findings,js_analysis=js,
-        notes=["Only public responses and delivered assets were inspected.",
-               "Technology and JavaScript string matches are heuristic clues, not proof.",
-               "Crawler is bounded and limited to same-origin links discovered from the first page."],
-        reconstruction=reconstruction)
+        headers={key.lower(): value for key, value in headers.items()},
+        technologies=tech,
+        assets=assets,
+        page=page,
+        pages=pages,
+        edges=[{"source": source, "target": target} for source, target in edges],
+        findings=findings,
+        js_analysis=js,
+        notes=[
+            "Only public responses and delivered assets were inspected.",
+            "Technology and JavaScript string matches are heuristic clues, not proof.",
+            f"Crawler follows same-origin links breadth-first and stops at the requested {max_pages}-page limit.",
+            "Page relationships include only links observed in fetched HTML.",
+        ],
+        reconstruction=reconstruction,
+    )
