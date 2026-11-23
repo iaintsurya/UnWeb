@@ -499,7 +499,7 @@ def _extract_dependencies(
     elif name == "cargo.toml":
         try:
             data = tomllib.loads(content)
-        except (tomllib.TOMLDecodeError, TypeError):
+        except (tomllib.TOMLDecodeError, TypeError, RecursionError):
             return []
         groups = ("dependencies", "dev-dependencies", "build-dependencies")
         sections = [(group, data.get(group, {})) for group in groups]
@@ -524,7 +524,7 @@ def _extract_dependencies(
     elif name == "cargo.lock":
         try:
             data = tomllib.loads(content)
-        except (tomllib.TOMLDecodeError, TypeError):
+        except (tomllib.TOMLDecodeError, TypeError, RecursionError):
             return []
         for package in data.get("package", []):
             if isinstance(package, dict) and isinstance(package.get("name"), str):
