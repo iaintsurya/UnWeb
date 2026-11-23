@@ -128,3 +128,43 @@ def test_fetch_github_archive_enforces_streamed_size_limit(tmp_path, monkeypatch
             "https://github.com/owner/repo", "main", tmp_path / "repository.zip"
         ))
     assert error.value.code == "github_archive_too_large"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com//owner/repo",
+        "https://github.com/owner//repo",
+        "https://github.com/owner/repo//",
+    ],
+)
+def test_parse_github_repository_url_rejects_duplicate_path_separators(url):
+    with pytest.raises(github_source.GitHubSourceError):
+        github_source.parse_github_repository_url(url)
+
+
+def test_parse_github_repository_url_accepts_one_trailing_slash():
+    assert github_source.parse_github_repository_url(
+        "https://github.com/owner/repo/"
+    ) == ("owner", "repo")
+
+
+@pytest.mark.parametrize("metadata_body", ["not-json", "[]", "null"])
+def test_fetch_github_archive_rejects_invalid_repository_metadata(
+    tmp_path, monkeypatch, metadata_body
+):
+    def handler(request):
+        return httpx.Response(200, text=metadata_body)
+
+    transport = httpx.MockTransport(handler)
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        github_source.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: original_client(*args, transport=transport, **kwargs),
+    )
+    with pytest.raises(github_source.GitHubSourceError) as error:
+        asyncio.run(github_source.fetch_github_repository_archive(
+            "https://github.com/owner/repo", None, tmp_path / "repository.zip"
+        ))
+    assert error.value.code == "github_metadata_invalid"
