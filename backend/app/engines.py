@@ -234,6 +234,60 @@ def _iter_js_string_literals(body: str):
                 index += 1
 
 
+def _mask_js_comments(body: str) -> str:
+    """Replace comments with spaces while preserving strings and line numbers."""
+    chars = list(body)
+    index = 0
+    quote = None
+    backtick = chr(96)
+
+    while index < len(body):
+        current = body[index]
+        following = body[index + 1] if index + 1 < len(body) else ""
+
+        if quote:
+            if current == "\\":
+                index += 2
+                continue
+            if current == quote:
+                quote = None
+            index += 1
+            continue
+
+        if current in {"'", '"', backtick}:
+            quote = current
+            index += 1
+            continue
+
+        if current == "/" and following == "/":
+            chars[index] = " "
+            chars[index + 1] = " "
+            index += 2
+            while index < len(body) and body[index] not in "\r\n":
+                chars[index] = " "
+                index += 1
+            continue
+
+        if current == "/" and following == "*":
+            chars[index] = " "
+            chars[index + 1] = " "
+            index += 2
+            while index < len(body):
+                if body[index] == "*" and index + 1 < len(body) and body[index + 1] == "/":
+                    chars[index] = " "
+                    chars[index + 1] = " "
+                    index += 2
+                    break
+                if body[index] not in "\r\n":
+                    chars[index] = " "
+                index += 1
+            continue
+
+        index += 1
+
+    return "".join(chars)
+
+
 def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
     """Extract explainable route, library, and source-map clues from JS."""
     route_pattern = re.compile(r"^/(?:api|v\d+|auth|graphql|admin)(?:/|$)", re.I)
@@ -290,8 +344,9 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
     ]
     libraries = []
     library_evidence = []
+    searchable_body = _mask_js_comments(body)
     for name, pattern in library_rules:
-        match = re.search(pattern, body, re.I)
+        match = re.search(pattern, searchable_body, re.I)
         if match:
             libraries.append(name)
             evidence = body[max(0, match.start() - 45):min(len(body), match.end() + 65)].replace("\n", " ")[:140]
@@ -300,6 +355,7 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
                 "confidence": "medium",
                 "evidence": evidence,
                 "offset": match.start(),
+                "line": body.count("\n", 0, match.start()) + 1,
             })
 
     source_maps = []
