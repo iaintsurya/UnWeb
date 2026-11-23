@@ -2,7 +2,7 @@
 
 Run the backend suite with `cd backend && python -m pytest -q`.
 
-Backend tests cover URL normalisation and private-address rejection, mocked breadth-first crawling, page limits, observed sitemap edges, same-origin redirect boundaries, response content types, cross-page assets/scripts, SQLite persistence/retention, HTML extraction, passive security-header evidence, and JavaScript lexical clues.
+Backend tests cover URL normalisation and private-address rejection, mocked breadth-first crawling, page limits, observed sitemap edges, same-origin redirect boundaries, IP-pinned DNS/Host/SNI behavior, response content types, cross-page assets/scripts, SQLite persistence/retention, HTML extraction, passive security-header evidence, and JavaScript lexical clues.
 
 Run the frontend checks with `cd frontend && npm ci && npm run build && npm test`. Vitest tests the shared API request helper's success and error handling; the build runs TypeScript's strict project checks before bundling.
 
