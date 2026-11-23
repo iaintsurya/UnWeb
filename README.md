@@ -50,7 +50,7 @@ npm run dev
 - `GET /api/scans/{scan_id}/reconstruction`
 
 ## Safety and limits
-UnWeb restricts URL schemes to HTTP(S), rejects non-global IP destinations, resolves hostnames before requests, revalidates redirects, disables ambient proxy configuration, caps response bytes and timeouts, and bounds page/script counts, and rejects explicitly non-HTML page responses. These application-level checks do not fully eliminate DNS rebinding or time-of-check/time-of-use risks. Before any public deployment, enforce outbound network filtering outside the app, isolate scan workers, set CPU/memory/concurrency limits, add authentication/rate limits, and conduct a security review.
+UnWeb restricts URL schemes to HTTP(S), rejects non-global IP destinations, resolves hostnames before requests, revalidates redirects, disables ambient proxy configuration, caps response bytes and timeouts, bounds page/script counts, and rejects explicitly non-HTML page responses. The crawler follows same-origin links breadth-first up to the requested page limit; its sitemap graph contains only observed links between successfully scanned HTML pages. These application-level checks do not fully eliminate DNS rebinding or time-of-check/time-of-use risks. Before any public deployment, enforce outbound network filtering outside the app, isolate scan workers, set CPU/memory/concurrency limits, add authentication/rate limits, and conduct a security review.
 
 It does not bypass authentication, CAPTCHAs, access controls, or rate limits. Technology matches and JavaScript string matches are clues, not proof. Reconstruction is a safe editable starting point, not recovered source code or guaranteed pixel-perfect cloning.
 
