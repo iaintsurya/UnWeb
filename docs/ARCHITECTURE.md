@@ -9,9 +9,9 @@ URL normalisation
   -> HTML content-type validation
   -> breadth-first same-origin page discovery
   -> metadata, technology, and cross-page asset extraction
-  -> bounded JavaScript lexical clues
+  -> comment-aware JavaScript route, library, and source-map evidence
   -> passive security-header observations
-  -> optional editable reconstruction
+  -> optional structured React reconstruction and script-free HTML preview
   -> SQLite persistence and JSON API response
 ```
 
