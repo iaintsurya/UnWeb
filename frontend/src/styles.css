@@ -19,3 +19,17 @@
 .history-item small{font:9px var(--mono);color:#969da3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .history-empty{padding:0 9px;font-size:9px;line-height:1.5;color:#9a9fa5}
 @media(max-width:720px){.history-block{display:none}.page-limit{max-width:76px}}
+
+.sitemap-graph-wrap{padding:14px 14px 8px;border-bottom:1px solid #eceeeb}
+.sitemap-graph-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.sitemap-graph-heading b{font-size:10px;color:#3b424b}
+.sitemap-graph-heading span{font:9px var(--mono);color:#9298a0}
+.sitemap-graph-scroll{overflow-x:auto;overflow-y:hidden;border:1px solid #eceeea;border-radius:5px;background:linear-gradient(180deg,#fbfcfa,#f6f8f5)}
+.sitemap-graph{display:block;width:100%;min-width:520px;height:auto}
+.sitemap-edge{fill:none;stroke:#c8a16b;stroke-width:1.7;opacity:.78}
+.sitemap-node rect{fill:#fff;stroke:#dce1dc;stroke-width:1.2}
+.sitemap-node.root rect{fill:#f8f3e9;stroke:#c5a36f}
+.sitemap-node-index{font:8px var(--mono);letter-spacing:.07em;fill:#9a7849}
+.sitemap-node-title{font:11px var(--mono);fill:#414a53}
+.sitemap-node-status{font:8px var(--mono);fill:#8b949b}
+.sitemap-graph-caption{font-size:9px;color:#969da3;line-height:1.5;margin:9px 0 0}
