@@ -24,6 +24,17 @@ def make_result():
     )
 
 
+def test_scan_api_requires_explicit_authorisation():
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/scans",
+            json={"url": "https://example.com/", "max_pages": 4},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "website_authorisation_required"
+
+
 def test_scan_api_persists_result_and_lists_history(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "api-test.sqlite3")
     monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(10, 60))
@@ -36,7 +47,7 @@ def test_scan_api_persists_result_and_lists_history(tmp_path, monkeypatch):
     with TestClient(main.app) as client:
         created = client.post(
             "/api/scans",
-            json={"url": "https://example.com/", "max_pages": 4},
+            json={"url": "https://example.com/", "max_pages": 4, "authorised": True},
         )
         assert created.status_code == 200
         assert created.json()["id"] == "api-test-scan"
@@ -76,11 +87,11 @@ def test_scan_api_returns_retry_after_when_rate_limited(tmp_path, monkeypatch):
     with TestClient(main.app) as client:
         first = client.post(
             "/api/scans",
-            json={"url": "https://example.com/", "max_pages": 4},
+            json={"url": "https://example.com/", "max_pages": 4, "authorised": True},
         )
         second = client.post(
             "/api/scans",
-            json={"url": "https://example.com/", "max_pages": 4},
+            json={"url": "https://example.com/", "max_pages": 4, "authorised": True},
         )
 
     assert first.status_code == 200
