@@ -291,14 +291,14 @@ Source page: {base_url}
 
 ## Files
 
-- \`App.tsx\` — editable React component with structured content blocks
-- \`reconstructed.css\` — starter styling
-- \`preview.html\` — script-free static preview generated from extracted content
-- \`reconstruction-manifest.json\` — source and extraction counts
+- `App.tsx` — editable React component with structured content blocks
+- `reconstructed.css` — starter styling
+- `preview.html` — script-free static preview generated from extracted content
+- `reconstruction-manifest.json` — source and extraction counts
 
 ## Run
 
-Copy the files into a React + TypeScript project, install React, and import \`App.tsx\`.
+Copy the files into a React + TypeScript project, install React, and import `App.tsx`.
 
 This is a structural reconstruction of publicly delivered HTML. It does not recover original source code, stylesheets, JavaScript, server logic, or authenticated content. Review all text, links, and image rights before publishing.
 """
