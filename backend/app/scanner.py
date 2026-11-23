@@ -82,6 +82,32 @@ def _pinned_request(url: str, address: str) -> tuple[str, str, dict[str, str]]:
     return pinned_url, host_header, extensions
 
 
+def _response_headers_for_analysis(headers) -> dict[str, str]:
+    """Keep response headers useful for analysis but never expose cookie values."""
+    result = {
+        str(key).lower(): str(value)
+        for key, value in headers.items()
+        if str(key).lower() != "set-cookie"
+    }
+    get_list = getattr(headers, "get_list", None)
+    if callable(get_list):
+        cookie_values = get_list("set-cookie")
+        if cookie_values:
+            # Internal analysis-only field. It is stripped before scan results
+            # are serialized or persisted.
+            result["__unweb_set_cookie_headers"] = "\n".join(cookie_values)
+    return result
+
+
+def _public_response_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Return safe response metadata; Set-Cookie values are secrets, not evidence."""
+    return {
+        key.lower(): value
+        for key, value in headers.items()
+        if key.lower() not in {"set-cookie", "__unweb_set_cookie_headers"}
+    }
+
+
 def _is_html(headers: dict[str, str]) -> bool:
     content_type = next(
         (value for key, value in headers.items() if key.lower() == "content-type"),
@@ -127,7 +153,7 @@ async def safe_fetch(
                         if response.status_code in {301, 302, 303, 307, 308}:
                             location = response.headers.get("location")
                             if not location:
-                                return current, response.status_code, dict(response.headers), b""
+                                return current, response.status_code, _response_headers_for_analysis(response.headers), b""
                             if hop >= MAX_REDIRECTS:
                                 raise URLRejected("Too many redirects.")
                             redirect_url = normalize_url(urljoin(current, location))
@@ -144,7 +170,7 @@ async def safe_fetch(
                             if total > max_bytes:
                                 raise URLRejected(f"Response exceeded the {max_bytes} byte limit.")
                             chunks.append(chunk)
-                        return current, response.status_code, dict(response.headers), b"".join(chunks)
+                        return current, response.status_code, _response_headers_for_analysis(response.headers), b"".join(chunks)
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 last_connect_error = exc
                 continue
@@ -309,7 +335,7 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         scanned_at=datetime.now(timezone.utc).isoformat(),
         title=page.title,
         description=page.metadata.get("description") or page.metadata.get("og:description"),
-        headers={key.lower(): value for key, value in headers.items()},
+        headers=_public_response_headers(headers),
         technologies=tech,
         assets=assets,
         page=page,
