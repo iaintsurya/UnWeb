@@ -43,3 +43,6 @@ The backend suite includes adapter tests for website and repository evidence, st
 ## Repository route inventory tests
 
 Route inventory tests cover Python decorator methods, JavaScript/TypeScript route calls, comment/string false-positive guards, Go/Spring/PHP/Ruby lexical patterns, source locations, and explicit truncation at the 2,000-route budget. The checks remain static and do not execute repository code.
+## Website/repository correlation tests
+
+Frontend tests cover exact path overlap, query/trailing-slash normalisation, parameterised repository paths, known HTTP method conflicts, unknown JavaScript methods, dynamic-template confidence downgrades, and missing route-inventory handling. The correlation view must retain explicit limitations and never label a path overlap as a vulnerability.
