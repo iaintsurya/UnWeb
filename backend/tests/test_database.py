@@ -1,6 +1,3 @@
-import pytest
-from pydantic import ValidationError
-
 from app import database
 from app.models import ScanResult, PageSummary
 
@@ -54,3 +51,19 @@ def test_history_limit_is_clamped(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "unweb.sqlite3")
     database.initialize_database()
     assert database.list_scans(0) == []
+
+
+
+def test_old_scan_results_are_pruned_to_the_retention_limit(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "unweb.sqlite3")
+    monkeypatch.setattr(database, "MAX_STORED_SCANS", 2)
+    database.initialize_database()
+
+    for index in range(3):
+        result = sample_result(f"scan-{index}")
+        result.scanned_at = f"2026-11-2{index + 1}T10:00:00+00:00"
+        database.save_scan(result)
+
+    history = database.list_scans(10)
+    assert [item["id"] for item in history] == ["scan-2", "scan-1"]
+    assert database.get_scan("scan-0") is None
