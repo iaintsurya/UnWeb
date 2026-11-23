@@ -47,6 +47,28 @@ def test_detects_security_indicators_without_exposing_secret_values(tmp_path):
     assert "value has been redacted" in rendered
 
 
+def test_detects_dynamic_sql_but_not_parameterised_queries(tmp_path):
+    write_file(
+        tmp_path,
+        "src/database.py",
+        "cursor.execute(f\"SELECT * FROM users WHERE name = '{name}'\")\n"
+        "cursor.execute(\"SELECT * FROM users WHERE id = \" + user_id)\n"
+        "cursor.execute(\"SELECT * FROM users WHERE name = %s\", (name,))\n"
+        "cursor.execute(\"SELECT * FROM users WHERE email = {}\".format(email))\n"
+    )
+
+    report = analyse_repository(tmp_path)
+    matches = [
+        item for item in report.findings
+        if item.id == "python-dynamic-sql-query"
+    ]
+
+    assert len(matches) == 3
+    assert all(item.severity == "medium" for item in matches)
+    assert all(item.confidence == "medium" for item in matches)
+    assert all(item.validation_state == "suspected" for item in matches)
+
+
 def test_detects_provider_tokens_and_private_key_marker_without_values(tmp_path):
     token = "ghp_" + "A" * 36
     write_file(
