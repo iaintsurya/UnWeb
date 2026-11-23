@@ -53,6 +53,7 @@ def test_detects_dynamic_sql_but_not_parameterised_queries(tmp_path):
         "src/database.py",
         "cursor.execute(f\"SELECT * FROM users WHERE name = '{name}'\")\n"
         "cursor.execute(\"SELECT * FROM users WHERE id = \" + user_id)\n"
+        "cursor.execute(\"SELECT * FROM users WHERE id = %s\" % user_id)\n"
         "cursor.execute(\"SELECT * FROM users WHERE name = %s\", (name,))\n"
         "cursor.execute(\"SELECT * FROM users WHERE email = {}\".format(email))\n"
     )
@@ -63,7 +64,7 @@ def test_detects_dynamic_sql_but_not_parameterised_queries(tmp_path):
         if item.id == "python-dynamic-sql-query"
     ]
 
-    assert len(matches) == 3
+    assert len(matches) == 4
     assert all(item.severity == "medium" for item in matches)
     assert all(item.confidence == "medium" for item in matches)
     assert all(item.validation_state == "suspected" for item in matches)
