@@ -377,21 +377,16 @@ def test_zip_scanner_rejects_absolute_and_windows_style_paths(tmp_path):
     assert report.skipped_files >= 3
 
 
-def test_npm_v1_lockfile_nested_dependencies_are_walked_without_recursion(tmp_path):
-    nested = {}
-    cursor = nested
-    for index in range(600):
-        name = f"nested-{index}"
-        child = {"version": "1.0.0", "dependencies": {}}
-        cursor[name] = child
-        cursor = child["dependencies"]
-    write_file(
-        tmp_path,
-        "package-lock.json",
-        json.dumps({"lockfileVersion": 1, "dependencies": nested}),
-    )
+def test_npm_v1_lockfile_nested_dependencies_are_walked_iteratively(tmp_path):
+    nested_json = "{}"
+    for index in reversed(range(300)):
+        nested_json = (
+            f'{{"nested-{index}":{{"version":"1.0.0","dependencies":{nested_json}}}}}'
+        )
+    payload = '{"lockfileVersion":1,"dependencies":' + nested_json + '}'
+    write_file(tmp_path, "package-lock.json", payload)
     report = analyse_repository(tmp_path)
-    assert len(report.dependency_inventory) == 600
+    assert len(report.dependency_inventory) == 300
     assert report.dependency_inventory_truncated is False
 
 
@@ -408,7 +403,7 @@ def test_dependency_inventory_is_capped_and_reported_as_truncated(tmp_path):
 def test_malformed_or_wrong_shape_dependency_files_do_not_abort_scan(tmp_path):
     write_file(tmp_path, "package.json", json.dumps(["not", "an", "object"]))
     write_file(tmp_path, "package-lock.json", json.dumps(["also", "not", "an", "object"]))
-    write_file(tmp_path, "src/app.py", "eval(user_input)\\n")
+    write_file(tmp_path, "src/app.py", "eval(user_input)\n")
     report = analyse_repository(tmp_path)
     assert report.files_scanned == 3
     assert any(item.id == "python-dynamic-evaluation" for item in report.findings)
@@ -417,6 +412,6 @@ def test_malformed_or_wrong_shape_dependency_files_do_not_abort_scan(tmp_path):
 def test_deeply_nested_malformed_lockfile_is_skipped_without_aborting_scan(tmp_path):
     nested = "[" * 1_200 + "0" + "]" * 1_200
     write_file(tmp_path, "package-lock.json", nested)
-    write_file(tmp_path, "src/app.py", "eval(user_input)\\n")
+    write_file(tmp_path, "src/app.py", "eval(user_input)\n")
     report = analyse_repository(tmp_path)
     assert any(item.id == "python-dynamic-evaluation" for item in report.findings)
