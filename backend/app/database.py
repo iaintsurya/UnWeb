@@ -5,13 +5,15 @@ files out of version control; set UNWEB_DB_PATH to choose another location.
 """
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from .models import ScanResult
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "unweb.sqlite3"
 DB_PATH = Path(os.environ.get("UNWEB_DB_PATH", str(DEFAULT_DB_PATH)))
-MAX_STORED_SCANS = 1000
+MAX_STORED_SCANS = 250
 
 
 def _connect() -> sqlite3.Connection:
@@ -21,9 +23,19 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+@contextmanager
+def _connection() -> Iterator[sqlite3.Connection]:
+    connection = _connect()
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
 def initialize_database() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _connect() as connection:
+    with _connection() as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
             """
@@ -44,7 +56,7 @@ def initialize_database() -> None:
 
 
 def save_scan(result: ScanResult) -> None:
-    with _connect() as connection:
+    with _connection() as connection:
         connection.execute(
             """
             INSERT INTO scans (
@@ -82,7 +94,7 @@ def save_scan(result: ScanResult) -> None:
 
 
 def get_scan(scan_id: str) -> ScanResult | None:
-    with _connect() as connection:
+    with _connection() as connection:
         row = connection.execute(
             "SELECT payload FROM scans WHERE id = ?", (scan_id,)
         ).fetchone()
@@ -93,7 +105,7 @@ def get_scan(scan_id: str) -> ScanResult | None:
 
 def list_scans(limit: int = 20) -> list[dict[str, object]]:
     safe_limit = max(1, min(int(limit), 100))
-    with _connect() as connection:
+    with _connection() as connection:
         rows = connection.execute(
             """
             SELECT id, requested_url, final_url, title, status_code, scanned_at
