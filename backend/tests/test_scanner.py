@@ -101,3 +101,45 @@ def test_non_html_link_is_not_added_as_a_page(monkeypatch):
 
     assert len(result.pages) == 1
     assert result.edges == []
+
+
+
+def test_safe_fetch_rejects_off_origin_redirect_before_following(monkeypatch):
+    requested_urls = []
+
+    class RedirectResponse:
+        status_code = 302
+        headers = {"location": "https://outside.example/landing"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        def stream(self, method, url):
+            requested_urls.append(url)
+            return RedirectResponse()
+
+    monkeypatch.setattr(scanner, "validate_resolved_addresses", lambda url: [])
+    monkeypatch.setattr(scanner.httpx, "AsyncClient", FakeClient)
+
+    with pytest.raises(scanner.URLRejected, match="original site origin"):
+        asyncio.run(
+            scanner.safe_fetch(
+                "https://example.com/start",
+                allowed_origin=scanner._origin("https://example.com"),
+            )
+        )
+
+    assert requested_urls == ["https://example.com/start"]
