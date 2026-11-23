@@ -392,14 +392,14 @@ def _python_routes(source: str, relative_path: str) -> list[RepositoryRoute]:
             if not isinstance(decorator, ast.Call):
                 continue
             name = _dotted_name(decorator.func).rsplit(".", 1)[-1].lower()
-            if name not in HTTP_METHODS and name not in {"route", "api_route"}:
+            if name.upper() not in HTTP_METHODS and name not in {"route", "api_route"}:
                 continue
             if not decorator.args or not isinstance(decorator.args[0], ast.Constant):
                 continue
             route_path = decorator.args[0].value
             if not isinstance(route_path, str) or not _valid_literal_route(route_path):
                 continue
-            methods = [name.upper()] if name in HTTP_METHODS else ["GET"]
+            methods = [name.upper()] if name.upper() in HTTP_METHODS else ["GET"]
             if name in {"route", "api_route"}:
                 for keyword in decorator.keywords:
                     if keyword.arg == "methods" and isinstance(keyword.value, (ast.List, ast.Tuple)):
@@ -424,16 +424,19 @@ def _python_routes(source: str, relative_path: str) -> list[RepositoryRoute]:
     return routes
 
 
-def _mask_javascript_comments(source: str) -> str:
-    """Mask JS/TS comments while preserving strings, offsets and line numbers."""
+def _mask_javascript_comments(source: str) -> tuple[str, list[bool]]:
+    """Mask comments and mark code offsets, preserving string route literals."""
     chars = list(source)
+    code_mask = [True] * len(source)
     index = 0
     quote: str | None = None
     while index < len(chars):
         char = chars[index]
         following = chars[index + 1] if index + 1 < len(chars) else ""
         if quote:
-            if char == "\\":
+            code_mask[index] = False
+            if char == "\\" and index + 1 < len(chars):
+                code_mask[index + 1] = False
                 index += 2
                 continue
             if char == quote:
@@ -441,30 +444,36 @@ def _mask_javascript_comments(source: str) -> str:
             index += 1
             continue
         if char in {"'", '"', chr(96)}:
+            code_mask[index] = False
             quote = char
             index += 1
             continue
         if char == "/" and following == "/":
             chars[index] = chars[index + 1] = " "
+            code_mask[index] = code_mask[index + 1] = False
             index += 2
             while index < len(chars) and chars[index] not in {"\r", "\n"}:
                 chars[index] = " "
+                code_mask[index] = False
                 index += 1
             continue
         if char == "/" and following == "*":
             chars[index] = chars[index + 1] = " "
+            code_mask[index] = code_mask[index + 1] = False
             index += 2
             while index < len(chars):
                 if chars[index] == "*" and index + 1 < len(chars) and chars[index + 1] == "/":
                     chars[index] = chars[index + 1] = " "
+                    code_mask[index] = code_mask[index + 1] = False
                     index += 2
                     break
                 if chars[index] not in {"\r", "\n"}:
                     chars[index] = " "
+                code_mask[index] = False
                 index += 1
             continue
         index += 1
-    return "".join(chars)
+    return "".join(chars), code_mask
 
 
 _JS_ROUTE_CALL = re.compile(
@@ -502,7 +511,7 @@ def _extract_repository_routes(
     patterns: list[tuple[re.Pattern[str], str, str]] = []
     if suffix in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}:
         patterns.append((_JS_ROUTE_CALL, "method", "javascript-method-call"))
-        source = _mask_javascript_comments(content)
+        source, code_mask = _mask_javascript_comments(content)
     elif suffix == ".go":
         patterns.append((_GO_ROUTE_CALL, "ANY", "go-handler"))
         source = content
@@ -520,6 +529,8 @@ def _extract_repository_routes(
 
     for pattern, method_field, syntax in patterns:
         for match in pattern.finditer(source):
+            if syntax == "javascript-method-call" and not code_mask[match.start()]:
+                continue
             route_path = match.group("path")
             if not _valid_literal_route(route_path):
                 continue
