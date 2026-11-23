@@ -10,6 +10,7 @@ import ast
 import json
 import os
 import re
+import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterator
@@ -65,11 +66,23 @@ class RepositoryFinding:
     recommendation: str
 
 
+@dataclass(frozen=True)
+class DependencyRecord:
+    name: str
+    ecosystem: str
+    source_path: str
+    source_type: str
+    version_constraint: str | None = None
+    resolved_version: str | None = None
+    dependency_group: str = "runtime"
+
+
 @dataclass
 class RepositoryReport:
     repository: str
     scanner_version: str
     findings: list[RepositoryFinding]
+    dependency_inventory: list[DependencyRecord]
     files_scanned: int
     bytes_scanned: int
     skipped_files: int
@@ -81,6 +94,8 @@ class RepositoryReport:
             "repository": self.repository,
             "scanner_version": self.scanner_version,
             "findings": [asdict(item) for item in self.findings],
+            "dependency_inventory": [asdict(item) for item in self.dependency_inventory],
+            "dependency_count": len(self.dependency_inventory),
             "files_scanned": self.files_scanned,
             "bytes_scanned": self.bytes_scanned,
             "skipped_files": self.skipped_files,
@@ -325,6 +340,194 @@ def _analyse_python_ast(
     return findings
 
 
+
+def _dependency_from_requirement(
+    requirement: str, ecosystem: str, source_path: str, group: str
+) -> DependencyRecord | None:
+    value = requirement.strip()
+    if not value or value.startswith(("#", "-", "git+", "http:", "https:")):
+        return None
+    value = value.split(";", 1)[0].strip()
+    match = re.match(r"^([A-Za-z0-9_.-]+)(?:\[[^]]+\])?\s*(.*)$", value)
+    if not match:
+        return None
+    name = match.group(1)
+    constraint = match.group(2).strip() or None
+    return DependencyRecord(
+        name=name, ecosystem=ecosystem, source_path=source_path,
+        source_type="manifest", version_constraint=constraint,
+        dependency_group=group,
+    )
+
+
+def _extract_dependencies(path: Path, content: str, relative_path: str) -> list[DependencyRecord]:
+    """Parse common dependency manifests/lockfiles using only stdlib parsers."""
+    name = path.name.lower()
+    records: list[DependencyRecord] = []
+
+    if name == "package.json":
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        for group in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
+            section = data.get(group, {})
+            if not isinstance(section, dict):
+                continue
+            for package_name, constraint in section.items():
+                if isinstance(package_name, str) and isinstance(constraint, str):
+                    records.append(DependencyRecord(
+                        name=package_name, ecosystem="npm",
+                        source_path=relative_path, source_type="manifest",
+                        version_constraint=constraint,
+                        dependency_group=group,
+                    ))
+
+    elif name == "package-lock.json":
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        packages = data.get("packages", {})
+        if isinstance(packages, dict):
+            for package_path, package in packages.items():
+                if not package_path or not isinstance(package, dict):
+                    continue
+                if not package_path.startswith("node_modules/"):
+                    continue
+                package_name = package_path.rsplit("node_modules/", 1)[-1]
+                if isinstance(package.get("name"), str):
+                    package_name = package["name"]
+                version = package.get("version")
+                records.append(DependencyRecord(
+                    name=package_name, ecosystem="npm",
+                    source_path=relative_path, source_type="lockfile",
+                    resolved_version=version if isinstance(version, str) else None,
+                    dependency_group="locked",
+                ))
+
+    elif name == "pyproject.toml":
+        try:
+            data = tomllib.loads(content)
+        except (tomllib.TOMLDecodeError, TypeError):
+            return []
+        project = data.get("project", {})
+        if isinstance(project, dict):
+            for requirement in project.get("dependencies", []):
+                if isinstance(requirement, str):
+                    item = _dependency_from_requirement(
+                        requirement, "pypi", relative_path, "runtime"
+                    )
+                    if item:
+                        records.append(item)
+            optional = project.get("optional-dependencies", {})
+            if isinstance(optional, dict):
+                for group, requirements in optional.items():
+                    if isinstance(requirements, list):
+                        for requirement in requirements:
+                            if isinstance(requirement, str):
+                                item = _dependency_from_requirement(
+                                    requirement, "pypi", relative_path, str(group)
+                                )
+                                if item:
+                                    records.append(item)
+        poetry = data.get("tool", {}).get("poetry", {}) if isinstance(data.get("tool", {}), dict) else {}
+        if isinstance(poetry, dict):
+            for group in ("dependencies", "dev-dependencies"):
+                section = poetry.get(group, {})
+                if isinstance(section, dict):
+                    for package_name, constraint in section.items():
+                        if package_name.lower() == "python":
+                            continue
+                        version = constraint if isinstance(constraint, str) else (
+                            constraint.get("version") if isinstance(constraint, dict) else None
+                        )
+                        records.append(DependencyRecord(
+                            name=package_name, ecosystem="pypi",
+                            source_path=relative_path, source_type="manifest",
+                            version_constraint=version if isinstance(version, str) else None,
+                            dependency_group="development" if group == "dev-dependencies" else "runtime",
+                        ))
+
+    elif name.startswith("requirements") and name.endswith((".txt", ".in")):
+        for line in content.splitlines():
+            item = _dependency_from_requirement(
+                line, "pypi", relative_path, "runtime"
+            )
+            if item:
+                records.append(item)
+
+    elif name == "cargo.toml":
+        try:
+            data = tomllib.loads(content)
+        except (tomllib.TOMLDecodeError, TypeError):
+            return []
+        groups = ("dependencies", "dev-dependencies", "build-dependencies")
+        sections = [(group, data.get(group, {})) for group in groups]
+        target = data.get("target", {})
+        if isinstance(target, dict):
+            for target_section in target.values():
+                if isinstance(target_section, dict):
+                    sections.extend((group, target_section.get(group, {})) for group in groups)
+        for group, section in sections:
+            if isinstance(section, dict):
+                for package_name, constraint in section.items():
+                    version = constraint if isinstance(constraint, str) else (
+                        constraint.get("version") if isinstance(constraint, dict) else None
+                    )
+                    records.append(DependencyRecord(
+                        name=package_name, ecosystem="cargo",
+                        source_path=relative_path, source_type="manifest",
+                        version_constraint=version if isinstance(version, str) else None,
+                        dependency_group=group,
+                    ))
+
+    elif name == "cargo.lock":
+        try:
+            data = tomllib.loads(content)
+        except (tomllib.TOMLDecodeError, TypeError):
+            return []
+        for package in data.get("package", []):
+            if isinstance(package, dict) and isinstance(package.get("name"), str):
+                version = package.get("version")
+                records.append(DependencyRecord(
+                    name=package["name"], ecosystem="cargo",
+                    source_path=relative_path, source_type="lockfile",
+                    resolved_version=version if isinstance(version, str) else None,
+                    dependency_group="locked",
+                ))
+
+    elif name == "go.mod":
+        in_require_block = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("require ("):
+                in_require_block = True
+                continue
+            if in_require_block and stripped == ")":
+                in_require_block = False
+                continue
+            if stripped.startswith("require "):
+                parts = stripped.split()
+                if len(parts) >= 3:
+                    records.append(DependencyRecord(
+                        name=parts[1], ecosystem="go",
+                        source_path=relative_path, source_type="manifest",
+                        version_constraint=parts[2],
+                    ))
+                continue
+            if in_require_block and stripped and not stripped.startswith("//"):
+                parts = stripped.split()
+                if len(parts) >= 2:
+                    records.append(DependencyRecord(
+                        name=parts[0], ecosystem="go",
+                        source_path=relative_path, source_type="manifest",
+                        version_constraint=parts[1],
+                    ))
+    return records
+
+
+
 def analyse_repository(
     repository_path: str | Path, *, max_files: int = MAX_FILES,
     max_total_bytes: int = MAX_TOTAL_BYTES,
@@ -345,6 +548,7 @@ def analyse_repository(
         raise ValueError("Repository path must be a directory.")
 
     findings: list[RepositoryFinding] = []
+    dependency_inventory: list[DependencyRecord] = []
     seen: set[tuple[str, str, int]] = set()
     files_scanned = bytes_scanned = skipped_files = 0
     truncated = False
@@ -384,6 +588,7 @@ def analyse_repository(
         files_scanned += 1
         bytes_scanned += len(raw)
         relative_path = path.relative_to(root).as_posix()
+        dependency_inventory.extend(_extract_dependencies(path, content, relative_path))
         file_findings: list[RepositoryFinding] = []
         for line_number, line in enumerate(content.splitlines(), start=1):
             file_findings.extend(_analyse_line(path, relative_path, line_number, line))
@@ -402,14 +607,15 @@ def analyse_repository(
             break
 
     return RepositoryReport(
-        repository=root.name, scanner_version="0.1.0", findings=findings,
+        repository=root.name, scanner_version="0.2.0", findings=findings,
+        dependency_inventory=dependency_inventory,
         files_scanned=files_scanned, bytes_scanned=bytes_scanned,
         skipped_files=skipped_files, truncated=truncated,
         limitations=[
             "Python dangerous-call checks use AST; cross-language/configuration checks are lexical and line-based. No control-flow, data-flow, or reachability analysis is performed.",
             "Findings are suspected indicators, not validated vulnerabilities.",
             "No repository code is executed and no network requests are made.",
-            "Dependencies are not installed and dependency advisories are not queried.",
+            "Dependency manifests and lockfiles are inventoried, but no advisory database is queried and no vulnerable-version conclusion is made.",
             "Coverage is limited to supported source/configuration types and bounded scan budgets.",
         ],
     )
