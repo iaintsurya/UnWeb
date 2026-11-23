@@ -33,7 +33,7 @@ def test_recursive_crawl_records_only_observed_edges(monkeypatch):
     }
     calls = []
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
         calls.append(url)
         if url not in responses:
             raise AssertionError(f"Unexpected fetch: {url}")
@@ -66,7 +66,7 @@ def test_crawl_respects_page_limit(monkeypatch):
     }
     calls = []
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
         calls.append(url)
         return url, 200, {"content-type": "text/html"}, responses[url]
 
@@ -78,7 +78,7 @@ def test_crawl_respects_page_limit(monkeypatch):
 
 
 def test_non_html_target_is_rejected(monkeypatch):
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
         return url, 200, {"content-type": "application/json"}, b'{"ok":true}'
 
     monkeypatch.setattr(scanner, "safe_fetch", fake_safe_fetch)
@@ -91,7 +91,7 @@ def test_non_html_link_is_not_added_as_a_page(monkeypatch):
         "https://example.com/": html_page("Home", "/data.json"),
     }
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
         if url == "https://example.com/data.json":
             return url, 200, {"content-type": "application/json"}, b'{"ok":true}'
         return url, 200, {"content-type": "text/html"}, responses[url]
