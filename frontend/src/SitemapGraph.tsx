@@ -71,12 +71,27 @@ export default function SitemapGraph({ pages, edges }: Props) {
             const sy = source.y + NODE_HEIGHT / 2;
             const tx = target.x + NODE_WIDTH / 2;
             const ty = target.y + NODE_HEIGHT / 2;
-            const curve = Math.max(24, Math.abs(ty - sy) * 0.28);
-            const direction = ty >= sy ? 1 : -1;
+            const dx = tx - sx;
+            const dy = ty - sy;
+            const distance = Math.max(1, Math.hypot(dx, dy));
+            const ux = dx / distance;
+            const uy = dy / distance;
+            const boundary = (x: number, y: number) =>
+              1 / Math.sqrt(
+                (x / (NODE_WIDTH / 2)) ** 2 + (y / (NODE_HEIGHT / 2)) ** 2,
+              );
+            const startOffset = boundary(ux, uy);
+            const endOffset = boundary(ux, uy);
+            const startX = sx + ux * (startOffset + 2);
+            const startY = sy + uy * (startOffset + 2);
+            const endX = tx - ux * (endOffset + 8);
+            const endY = ty - uy * (endOffset + 8);
+            const curve = Math.max(24, Math.abs(endY - startY) * 0.28);
+            const direction = endY >= startY ? 1 : -1;
             return (
               <path
                 key={`${edge.source}-${edge.target}-${index}`}
-                d={`M ${sx} ${sy} C ${sx} ${sy + curve * direction}, ${tx} ${ty - curve * direction}, ${tx} ${ty}`}
+                d={`M ${startX} ${startY} C ${startX} ${startY + curve * direction}, ${endX} ${endY - curve * direction}, ${endX} ${endY}`}
                 className="sitemap-edge"
                 markerEnd="url(#sitemap-arrow)"
               />
