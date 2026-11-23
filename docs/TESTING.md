@@ -12,7 +12,7 @@ Run the frontend checks with `cd frontend && npm ci && npm run build && npm test
 
 ## Repository-analysis regression coverage
 
-The local repository-analysis suite uses temporary fixture repositories and verifies credential/token/private-key redaction, placeholder filtering, heuristic rule matches, skip-directory behavior, symlink handling, file/byte limits, invalid-input handling, CLI JSON output, and the suspected validation state. It does not clone repositories, execute scanned code, or query external vulnerability sources.
+The local repository-analysis suite uses temporary fixture repositories and verifies credential/token/private-key redaction, placeholder filtering, Python AST checks for multiline calls/comment exclusion, cross-language heuristic rule matches, skip-directory behavior, symlink handling, file/byte limits, invalid-input handling, CLI JSON output, and the suspected validation state. It does not clone repositories, execute scanned code, or query external vulnerability sources.
 
 ## Security test requirements (planned)
 
