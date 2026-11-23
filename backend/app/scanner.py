@@ -161,16 +161,47 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         pages.append(discovered_page)
         discover_links(discovered_page)
 
+    # Consolidate assets across every discovered HTML page, not just the
+    # landing page. De-duplicate by (kind, URL) while preserving discovery order.
+    asset_keys = {(item["kind"], item["url"]) for item in assets}
+    for scanned_page in pages:
+        for kind, urls in (
+            ("script", scanned_page.scripts),
+            ("stylesheet", scanned_page.stylesheets),
+            ("image", scanned_page.images),
+        ):
+            for asset_url in urls:
+                key = (kind, asset_url)
+                if key not in asset_keys:
+                    asset_keys.add(key)
+                    assets.append({"kind": kind, "url": asset_url})
+
+    # Analyse a bounded, de-duplicated set of same-origin scripts across all
+    # scanned pages. Every script redirect remains pinned to the crawl origin.
+    script_urls = list(dict.fromkeys(
+        script_url
+        for scanned_page in pages
+        for script_url in scanned_page.scripts
+        if _same_origin(script_url, origin)
+    ))[:20]
     js = []
-    for script_url in page.scripts[:20]:
-        if not _same_origin(script_url, origin):
-            continue
+    for script_url in script_urls:
         try:
-            fetched_script_url, _, _, script = await safe_fetch(
+            fetched_script_url, _, script_headers, script = await safe_fetch(
                 script_url, MAX_SCRIPT, allowed_origin=origin
             )
             if not _same_origin(fetched_script_url, origin):
                 raise URLRejected("Script redirected outside the target origin.")
+            content_type = next(
+                (value for key, value in script_headers.items() if key.lower() == "content-type"),
+                "",
+            ).split(";", 1)[0].strip().lower()
+            if content_type and not (
+                "javascript" in content_type
+                or "ecmascript" in content_type
+                or content_type in {"text/plain", "application/octet-stream"}
+            ):
+                raise URLRejected("Script response did not have a recognised JavaScript content type.")
             js.append(
                 analyze_javascript(
                     fetched_script_url,
