@@ -1,7 +1,8 @@
 import asyncio
 import uuid
 import httpx
-import re
+import ipaddress
+
 from collections import deque
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit, urldefrag
@@ -36,6 +37,51 @@ def _same_origin(url: str, origin: tuple[str, str, int]) -> bool:
         return False
 
 
+def _pinned_request(url: str, address: str) -> tuple[str, str, dict[str, str]]:
+    """Build an IP-literal request while preserving Host and TLS identity."""
+    parts = urlsplit(url)
+    hostname = parts.hostname
+    if not hostname:
+        raise URLRejected("URL has no hostname.")
+
+    try:
+        ipaddress.ip_address(hostname)
+        is_ip_literal = True
+        origin_host = hostname
+    except ValueError:
+        is_ip_literal = False
+        try:
+            origin_host = hostname.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise URLRejected("Hostname could not be encoded safely.") from exc
+
+    try:
+        ipaddress.ip_address(address)
+    except ValueError as exc:
+        raise URLRejected("DNS returned an invalid address.") from exc
+
+    pinned_host = f"[{address}]" if ":" in address else address
+    pinned_netloc = pinned_host
+    host_header = f"[{origin_host}]" if ":" in origin_host else origin_host
+    if parts.port is not None:
+        pinned_netloc += f":{parts.port}"
+        host_header += f":{parts.port}"
+
+    pinned_url = urlunsplit((
+        parts.scheme,
+        pinned_netloc,
+        parts.path or "/",
+        parts.query,
+        "",
+    ))
+    extensions: dict[str, str] = {}
+    if parts.scheme == "https" and not is_ip_literal:
+        # HTTPX passes this through to httpcore for SNI and certificate
+        # hostname validation, while TCP connects to the validated IP.
+        extensions["sni_hostname"] = origin_host
+    return pinned_url, host_header, extensions
+
+
 def _is_html(headers: dict[str, str]) -> bool:
     content_type = next(
         (value for key, value in headers.items() if key.lower() == "content-type"),
@@ -54,14 +100,25 @@ async def safe_fetch(
 ):
     current = normalize_url(url)
     for hop in range(MAX_REDIRECTS + 1):
-        await asyncio.to_thread(validate_resolved_addresses, current)
+        # Resolve and validate once, then connect to that exact IP literal.
+        # HTTPX never performs a second DNS lookup for this request.
+        addresses = await asyncio.to_thread(validate_resolved_addresses, current)
+        pinned_url, host_header, extensions = _pinned_request(current, addresses[0])
         async with httpx.AsyncClient(
             timeout=TIMEOUT,
             follow_redirects=False,
             trust_env=False,
-            headers={"User-Agent": UA, "Accept": "text/html,*/*;q=0.5"},
         ) as client:
-            async with client.stream("GET", current) as response:
+            async with client.stream(
+                "GET",
+                pinned_url,
+                headers={
+                    "User-Agent": UA,
+                    "Accept": "text/html,*/*;q=0.5",
+                    "Host": host_header,
+                },
+                extensions=extensions,
+            ) as response:
                 if response.status_code in {301, 302, 303, 307, 308}:
                     location = response.headers.get("location")
                     if not location:
@@ -81,7 +138,7 @@ async def safe_fetch(
                     if total > max_bytes:
                         raise URLRejected(f"Response exceeded the {max_bytes} byte limit.")
                     chunks.append(chunk)
-                return str(response.url), response.status_code, dict(response.headers), b"".join(chunks)
+                return current, response.status_code, dict(response.headers), b"".join(chunks)
 
     raise URLRejected("Too many redirects.")
 
