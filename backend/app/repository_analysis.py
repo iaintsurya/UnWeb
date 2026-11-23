@@ -93,6 +93,7 @@ def _is_candidate(path: Path) -> bool:
     return (
         name == ".env"
         or name.startswith(".env.")
+        or name.endswith(".env")
         or name in SPECIAL_FILENAMES
         or path.suffix.lower() in SOURCE_EXTENSIONS
     )
