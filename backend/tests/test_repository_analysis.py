@@ -415,7 +415,7 @@ def test_malformed_or_wrong_shape_dependency_files_do_not_abort_scan(tmp_path):
 
 
 def test_deeply_nested_malformed_lockfile_is_skipped_without_aborting_scan(tmp_path):
-    nested = "{" * 1_200 + "}" * 1_200
+    nested = "[" * 1_200 + "0" + "]" * 1_200
     write_file(tmp_path, "package-lock.json", nested)
     write_file(tmp_path, "src/app.py", "eval(user_input)\\n")
     report = analyse_repository(tmp_path)
