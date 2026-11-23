@@ -15,7 +15,7 @@ URL normalisation
   -> SQLite persistence and JSON API response
 ```
 
-The sitemap contains only directed links observed in fetched HTML between pages that were successfully scanned. The API currently performs a scan in the request/response lifecycle, with a per-process limit of two active scans and a 120-second wall-clock timeout.
+The sitemap contains only directed links observed in fetched HTML between pages that were successfully scanned. The API currently performs a scan in the request/response lifecycle, with a per-process limit of two active scans, a 120-second wall-clock timeout, and a small in-process 10-per-minute direct-peer rate guard. CORS origins are configurable through `UNWEB_CORS_ORIGINS`. These controls are not shared across workers or instances.
 
 ## Persistence
 
