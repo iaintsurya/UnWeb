@@ -120,7 +120,7 @@ Before multi-user or enterprise use, storage must evolve to support authenticate
 
 ## Roadmap
 
-- **Foundation (current):** bounded crawler, observed page graph, SQLite scan history, JavaScript clues, passive security-header observations, optional isolated browser-worker prototype, tests and CI.
-- **Security assessment MVP:** scope/consent model, target inventory, structured findings/evidence, passive checks, explicit low-impact active checks, reports and retesting.
-- **Validation engine:** authorization testing using owner-provided test identities, safe input-validation checks, browser-assisted runtime evidence, API-focused checks, risk ranking, and remediation workflows.
+- **Foundation (current):** bounded crawler, observed page graph, SQLite scan history, JavaScript clues, passive security-header/cookie observations with cookie-value redaction, local read-only repository-analysis CLI (Python AST plus cross-language lexical checks), optional isolated browser-worker prototype, tests and CI.
+- **Security assessment MVP:** scope/consent model, target inventory, authenticated GitHub repository selection and bounded ingestion, common structured findings/evidence, documented passive checks, explicitly enabled low-impact checks, reports and retesting.
+- **Correlation and validation engine:** correlate live website/API routes and browser evidence with repository handlers and authorization logic; add stronger language-aware/data-flow and dependency analysis; use owner-provided test identities, safe input-validation checks, risk ranking, and remediation workflows.
 - **Production hardening:** authentication, shared rate limits, durable worker queue, external network policy enforcement, audit retention, role separation and independent security review.
