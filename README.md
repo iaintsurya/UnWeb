@@ -2,7 +2,7 @@
 
 **A website reverse-engineering, intelligence, and reconstruction platform.**
 
-UnWeb gathers bounded, publicly observable website evidence; extracts metadata and assets across discovered pages; maps same-origin page relationships; inspects delivered JavaScript with conservative heuristics; reports passive security observations; and generates an editable React starter from observed headings and text.
+UnWeb gathers bounded, publicly observable website evidence; extracts metadata and assets across discovered pages; maps same-origin page relationships; inspects delivered JavaScript for comment-aware route, framework, and source-map clues; reports passive security observations; and generates a structured React starter with a script-free HTML preview.
 
 > Early engineering preview — not production-ready. Use only on sites you own or are explicitly authorised to analyse.
 
@@ -93,7 +93,7 @@ Automated tests use local fixtures and mocked network responses. They do not sca
 
 ## Safety and limits
 
-UnWeb restricts URL schemes to HTTP(S), rejects non-global IP destinations, resolves and validates hostnames, then connects to the validated IP literal while preserving the original HTTP Host header and TLS SNI/certificate identity. It revalidates every redirect, disables ambient proxy configuration, caps response bytes and timeouts, bounds page/script counts, and rejects explicitly non-HTML page responses. DNS resolution runs off the async event loop. The crawler follows same-origin links breadth-first up to the requested page limit; its sitemap graph contains only observed links between successfully scanned HTML pages. Assets and bounded JavaScript clues are collected across discovered pages.
+UnWeb restricts URL schemes to HTTP(S), rejects non-global IP destinations, resolves and validates hostnames, then connects to the validated IP literal while preserving the original HTTP Host header and TLS SNI/certificate identity. It revalidates every redirect, disables ambient proxy configuration, caps response bytes and timeouts, bounds page/script counts, and rejects explicitly non-HTML page responses. DNS resolution runs off the async event loop. The crawler follows same-origin links breadth-first up to the requested page limit; its sitemap graph contains only observed links between successfully scanned HTML pages. Assets and bounded JavaScript clues are collected across discovered pages. JavaScript route references include source lines, confidence, and nearby lexical evidence; comment text is ignored for route discovery. Reconstruction exports a data-driven React component, starter CSS, a script-free HTML preview, a manifest, and usage notes.
 
 The preview API allows at most two active scans per process, applies a 120-second scan time limit, and permits 10 scan submissions per minute per direct peer IP in each process. These are basic abuse controls, not a replacement for authentication or shared per-user rate limits. Set `UNWEB_CORS_ORIGINS` to a comma-separated allowlist of frontend origins when hosting the API separately. The IP-pinned fetch path narrows the DNS-rebinding/time-of-check-to-time-of-use risk, but the application is still not a complete SSRF boundary; retain network-level egress controls in any public deployment.
 
