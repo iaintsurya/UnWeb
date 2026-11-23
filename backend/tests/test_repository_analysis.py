@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.repository_analysis import analyse_repository, main
+from app.repository_analysis import analyse_repository, analyse_repository_archive, main
 
 
 def write_file(root: Path, relative: str, content: str) -> Path:
