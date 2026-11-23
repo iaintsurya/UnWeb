@@ -229,9 +229,12 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
             continue
 
         page_html = page_body.decode("utf-8", errors="replace")
-        discovered_page, _, _ = analyze_html(fetched_url, page_html)
+        discovered_page, _, page_technologies = analyze_html(fetched_url, page_html)
         discovered_page.status_code = page_status
         pages.append(discovered_page)
+        for technology in page_technologies:
+            if not any(existing.get("name") == technology.get("name") for existing in tech):
+                tech.append(technology)
         discover_links(discovered_page)
 
     # Consolidate assets across every discovered HTML page, not just the
