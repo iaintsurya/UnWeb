@@ -201,3 +201,6 @@ AI tools may help brainstorm, scaffold, document, and debug. The maintainer is r
 ## License
 
 MIT. See `LICENSE`.
+## Common security evidence
+
+Website and repository scans now expose a shared `security_findings` record alongside the existing source-specific `findings` for compatibility. Each common record carries a stable location-based `finding_id`, `check_id`, source and target, structured location, severity, confidence, validation state, evidence, remediation, and scanner version. Severity and confidence are independent. Passive website response observations are marked `observed`; static repository indicators remain `suspected`. Unknown impact and preconditions are left explicit rather than guessed. These records are evidence containers, not proof of exploitability.
