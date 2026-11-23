@@ -96,6 +96,7 @@ Set `UNWEB_DB_PATH` in the backend process environment to use a different databa
 
 - `GET /api/health`
 - `POST /api/scans` with `{"url":"https://example.com","max_pages":8}`
+- `POST /api/repository-scans` with a raw ZIP request body, `Content-Type: application/zip`, `X-UnWeb-Authorised: true`, and optional URL-encoded `X-Repository-Filename`; streams up to 50 MB into a temporary file, analyses it, returns JSON, and deletes the archive.
 - `GET /api/scans?limit=20` — recent scan summaries (limit 1–100)
 - `GET /api/scans/{scan_id}` — full saved scan result
 - `GET /api/scans/{scan_id}/intelligence`
@@ -154,7 +155,7 @@ python -m app.repository_analysis /path/to/repository.zip --archive
 
 The CLI emits JSON. Default limits are 1,500 files, 1 MB per file, 20 MB total input, and 500 findings. It skips common dependency/build/VCS directories and symbolic links; detected secret values are redacted from evidence. It records declared constraints and lockfile-resolved versions where supported, but does not execute repository code, install dependencies, contact GitHub, query vulnerability databases, or make network requests. Dependency inventory is not an advisory scan and does not establish whether a package version is vulnerable.
 
-This is an initial prototype: Python dangerous-call checks use the standard-library AST, while cross-language/configuration rules are lexical and line-based. It is not CodeQL, Semgrep, dependency vulnerability auditing, data-flow/reachability analysis, or a complete SAST product. Results are labelled **suspected** and need human review. It can also inspect a bounded ZIP archive such as a downloaded GitHub source archive; archive paths, symlinks, entry counts, and uncompressed file/byte limits are checked before temporary extraction. It is still a local CLI, not connected to the API, dashboard, or GitHub App. Only analyse repositories you own or are authorised to assess.
+This is an initial prototype: Python dangerous-call checks use the standard-library AST, while cross-language/configuration rules are lexical and line-based. It is not CodeQL, Semgrep, dependency vulnerability auditing, data-flow/reachability analysis, or a complete SAST product. Results are labelled **suspected** and need human review. It can also inspect a bounded ZIP archive such as a downloaded GitHub source archive; archive paths, symlinks, entry counts, and uncompressed file/byte limits are checked before temporary extraction. It is also available in the dashboard through the Repository workspace, which uploads a ZIP to the bounded local API endpoint. The endpoint is upload-based, not connected to the GitHub App or remote clone API; reports are returned to the browser and are not persisted. Only analyse repositories you own or are authorised to assess.
 
 ## Tests
 
