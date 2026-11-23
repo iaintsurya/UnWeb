@@ -138,6 +138,21 @@ Install locally for development with `cd backend && pip install -r requirements-
 
 This is a single unauthenticated render: it does not submit forms, bypass access controls, reuse your browser profile, or crawl links. It is runtime evidence collection, not active vulnerability validation. Browser output is not yet persisted or shown in the web UI; durable isolated job orchestration is required before API integration.
 
+## Local repository analysis preview
+
+UnWeb also includes an early **read-only static analysis CLI** for a local repository checkout. It checks selected source and configuration files for credential-like assignments, common provider-token shapes, private-key markers, dynamic evaluation, risky process/deserialization calls, disabled TLS verification, and wildcard CORS configuration.
+
+Run it from the backend directory:
+
+```bash
+cd backend
+python -m app.repository_analysis /path/to/local/checkout
+```
+
+The CLI emits JSON. Default limits are 1,500 files, 1 MB per file, 20 MB total input, and 500 findings. It skips common dependency/build/VCS directories and symbolic links; detected secret values are redacted from evidence. It does not execute repository code, install dependencies, contact GitHub, query vulnerability databases, or make network requests.
+
+This is an initial lexical/line-based prototype—not CodeQL, Semgrep, dependency auditing, AST/data-flow analysis, or a complete SAST product. Results are labelled **suspected** and need human review. It is currently a local CLI, not connected to the API, dashboard, or GitHub App. Only analyse repositories you own or are authorised to assess.
+
 ## Tests
 
 ```bash
@@ -152,7 +167,7 @@ npm run build
 npm test
 ```
 
-Automated tests use local fixtures and mocked network responses. They do not scan third-party websites or launch a browser.
+Automated tests use local fixtures and mocked network responses. Repository-analysis tests use temporary local directories and do not clone or contact repositories. They do not scan third-party websites or launch a browser.
 
 ## Safety and limits
 
