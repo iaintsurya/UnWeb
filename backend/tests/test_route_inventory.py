@@ -45,7 +45,7 @@ def test_extracts_javascript_routes_but_ignores_comments_and_strings(tmp_path):
         "router.post('/api/items/:itemId', handler);\n"
         "// app.get('/commented-line', handler);\n"
         "/* router.delete('/commented-block', handler); */\n"
-        'const help = "example app.get(\\'/inside-string\\', handler)";\n',
+        """const help = \"example app.get('/inside-string', handler)\";\\n""",
     )
 
     routes = analyse_repository(tmp_path).to_dict()["route_inventory"]
