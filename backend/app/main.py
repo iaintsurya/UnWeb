@@ -1,5 +1,7 @@
 import asyncio
 import os
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -11,10 +13,17 @@ from .limits import SlidingWindowLimiter
 from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
 
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    await asyncio.to_thread(database.initialize_database)
+    yield
+
+
 app = FastAPI(
     title="UnWeb API",
     version="0.2.0",
     description="Bounded passive website intelligence.",
+    lifespan=lifespan,
 )
 DEFAULT_CORS_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
 CORS_ORIGINS = [
@@ -36,11 +45,6 @@ SCAN_SEMAPHORE = asyncio.Semaphore(2)
 SCAN_RATE_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 SCAN_QUEUE_TIMEOUT = 0.5
 SCAN_TIMEOUT_SECONDS = 120
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    await asyncio.to_thread(database.initialize_database)
 
 
 async def load_scan(scan_id: str) -> ScanResult:
