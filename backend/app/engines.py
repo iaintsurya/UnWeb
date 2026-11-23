@@ -1,4 +1,5 @@
 import re
+from http.cookies import SimpleCookie
 from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 from .models import Finding, PageSummary
@@ -51,9 +52,67 @@ def analyze_html(base_url: str, html: str):
         if condition: tech.append({"name":name,"confidence":confidence,"evidence":evidence})
     return page, assets, tech
 
+def _cookie_observations(headers: dict[str, str]) -> list[Finding]:
+    """Report cookie-attribute observations without retaining cookie values."""
+    raw = headers.get("__unweb_set_cookie_headers") or headers.get("set-cookie") or ""
+    if not raw:
+        return []
+
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    for raw_cookie in str(raw).splitlines():
+        parsed = SimpleCookie()
+        try:
+            parsed.load(raw_cookie)
+        except (TypeError, ValueError):
+            continue
+        for name, morsel in parsed.items():
+            safe_name = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-")[:48] or "unnamed"
+            attributes = (
+                ("secure", bool(morsel["secure"]), "Secure",
+                 "Set Secure on cookies that should only be sent over HTTPS."),
+                ("httponly", bool(morsel["httponly"]), "HttpOnly",
+                 "For session or authentication cookies, set HttpOnly unless client-side script access is explicitly required."),
+                ("samesite", bool(morsel["samesite"]), "SameSite",
+                 "Choose an explicit SameSite policy that matches the application's cross-site flows."),
+            )
+            for attribute_id, present, label, recommendation in attributes:
+                key = (safe_name, attribute_id)
+                if present or key in seen:
+                    continue
+                seen.add(key)
+                findings.append(Finding(
+                    id=f"cookie-{safe_name}-missing-{attribute_id}",
+                    title=f"Cookie '{name[:48]}' has no {label} attribute",
+                    severity="low",
+                    confidence="medium",
+                    evidence=(
+                        f"The response set cookie '{name[:48]}' without the {label} attribute; "
+                        "the cookie value was deliberately redacted."
+                    ),
+                    recommendation=recommendation,
+                ))
+            if morsel["samesite"].lower() == "none" and not morsel["secure"]:
+                key = (safe_name, "samesite-none-without-secure")
+                if key not in seen:
+                    seen.add(key)
+                    findings.append(Finding(
+                        id=f"cookie-{safe_name}-samesite-none-without-secure",
+                        title=f"Cookie '{name[:48]}' uses SameSite=None without Secure",
+                        severity="low",
+                        confidence="high",
+                        evidence=(
+                            f"The response set cookie '{name[:48]}' with SameSite=None but without Secure; "
+                            "the cookie value was deliberately redacted."
+                        ),
+                        recommendation="Add Secure to cookies using SameSite=None and serve them only over HTTPS.",
+                    ))
+    return findings
+
+
 def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
     h = {k.lower():v for k,v in headers.items()}
-    findings = []
+    findings = _cookie_observations(headers)
     for key,(title,recommendation) in SECURITY_HEADERS.items():
         if key not in h:
             findings.append(Finding(id=f"missing-{key}", title=title, severity="low", confidence="high",
