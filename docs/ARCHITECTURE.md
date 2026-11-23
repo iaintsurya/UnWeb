@@ -63,6 +63,23 @@ The proxy denies non-CONNECT traffic and any host/port other than the initial ta
 
 Cross-origin subresources are blocked, so pages that depend on third-party CSS, fonts, images, or scripts may render incompletely. The worker currently handles one unauthenticated HTTPS page per process. It does not click links, submit forms, use a saved browser profile, or write scan output to SQLite. It is intentionally not callable from the API until UnWeb has a durable job queue and a separately managed worker pool with enforceable per-job network policy.
 
+## Local repository analysis prototype
+
+The repository analyser is a separate local CLI path:
+
+```text
+Operator selects an authorised local checkout
+  -> resolve and validate the directory (reject symlink root)
+  -> enumerate supported source/config files without following symlinks
+  -> skip generated, dependency, and VCS directories
+  -> enforce file-count, per-file, total-byte, and finding budgets
+  -> run deterministic line-based checks
+  -> redact credential-shaped evidence
+  -> emit JSON with suspected status and explicit limitations
+```
+
+The prototype has no GitHub API integration, clone operation, dependency installation, network access, code execution, AST, control-flow, data-flow, or inter-file reachability analysis. It is not called by the FastAPI application. The next integration stage must add authenticated repository selection, immutable commit identity, safe archive/checkout ingestion, job isolation, durable evidence, and a common finding schema before dashboard or automated PR-review use.
+
 ## Finding and evidence model (planned)
 
 A finding should be a structured record, not just a label or a scary severity badge. The planned record includes:
