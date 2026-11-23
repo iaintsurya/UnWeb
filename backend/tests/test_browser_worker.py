@@ -235,6 +235,7 @@ def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch)
     assert report["title"] == "Example"
     assert report["network"]["request_count"] == 2
     assert report["network"]["blocked_request_count"] == 1
+    assert any("Cross-origin subresources are blocked" in item for item in report["limitations"])
     assert report["network"]["declared_response_bytes"] == 42
 
 
