@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 class ScanRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
     max_pages: int = Field(default=8, ge=1, le=30)
+    authorised: bool = False
 
 
 class Finding(BaseModel):
