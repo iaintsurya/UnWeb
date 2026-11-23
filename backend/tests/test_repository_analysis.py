@@ -149,3 +149,36 @@ def test_respects_symlink_repository_root_rejection(tmp_path):
         pytest.skip("Symlinks are not available on this platform")
     with pytest.raises(ValueError, match="symbolic link"):
         analyse_repository(alias)
+
+
+
+def test_python_ast_handles_multiline_calls_and_ignores_comments(tmp_path):
+    write_file(
+        tmp_path,
+        "src/multiline.py",
+        "\n".join([
+            "# eval(comment_only)",
+            "# os.system(command)",
+            "# requests.get(url, verify=False)",
+            "subprocess.run(",
+            "    command,",
+            "    shell=True,",
+            ")",
+            "requests.get(",
+            "    endpoint,",
+            "    verify=False,",
+            ")",
+            "yaml.load(",
+            "    untrusted_document,",
+            ")",
+            "yaml.load(data, Loader=yaml.SafeLoader)",
+        ]),
+    )
+    report = analyse_repository(tmp_path)
+    findings = [item for item in report.findings if item.path == "src/multiline.py"]
+    ids = {item.id for item in findings}
+    assert "python-subprocess-shell-true" in ids
+    assert "tls-certificate-verification-disabled" in ids
+    assert "python-yaml-load" in ids
+    assert not any(item.line < 4 for item in findings)
+    assert len([item for item in findings if item.id == "python-yaml-load"]) == 1
