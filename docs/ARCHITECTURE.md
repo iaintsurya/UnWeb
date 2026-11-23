@@ -138,3 +138,6 @@ The repository analyser extracts literal route declarations without executing so
 ## Website scan authorisation acknowledgement
 
 `ScanRequest.authorised` defaults to false and `POST /api/scans` rejects a request without an explicit true value before consuming scan capacity. The dashboard requires the operator to check the corresponding ownership/permission acknowledgement. This is not identity authentication or proof of ownership: an arbitrary API client can assert the boolean. A production service still needs authenticated operator identity, verified target ownership/permission, durable scope records (approved host/port/path/window), audit trails and enforced network policy. Current website crawling remains same-origin and bounded by page count, request size, concurrency, timeout and rate controls.
+## Python dynamic SQL heuristic
+
+The Python AST pass checks the first argument to `execute`, `executemany` and `executescript` for f-string interpolation, string `+`/`%` construction, or `.format()` calls. It deliberately avoids flagging a literal query passed separately from its bind parameters. It is a local syntactic indicator only: no taint tracking, variable propagation, interprocedural analysis, or runtime validation is performed, and findings remain suspected rather than confirmed SQL injection.
