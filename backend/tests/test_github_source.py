@@ -46,7 +46,7 @@ def test_fetch_github_archive_resolves_default_branch_and_pins_commit(tmp_path, 
         requested.append(str(request.url))
         if request.url.host == "api.github.com" and request.url.path == "/repos/owner/repo":
             return httpx.Response(200, json={"default_branch": "main"})
-        if request.url.host == "api.github.com" and request.url.path == f"/repos/owner/repo/commits/{COMMIT_SHA}":
+        if request.url.host == "api.github.com" and request.url.path == "/repos/owner/repo/commits/main":
             return httpx.Response(200, json={"sha": COMMIT_SHA})
         if request.url.host == "api.github.com" and request.url.path == f"/repos/owner/repo/zipball/{COMMIT_SHA}":
             return httpx.Response(
@@ -80,7 +80,7 @@ def test_fetch_github_archive_resolves_default_branch_and_pins_commit(tmp_path, 
 
 def test_fetch_github_archive_rejects_redirect_to_unapproved_host(tmp_path, monkeypatch):
     def handler(request):
-        if request.url.path == f"/repos/owner/repo/commits/{COMMIT_SHA}":
+        if request.url.path == "/repos/owner/repo/commits/main":
             return httpx.Response(200, json={"sha": COMMIT_SHA})
         if request.url.path == f"/repos/owner/repo/zipball/{COMMIT_SHA}":
             return httpx.Response(302, headers={"location": "https://attacker.example/archive.zip"})
