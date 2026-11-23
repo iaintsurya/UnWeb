@@ -149,7 +149,7 @@ cd backend
 python -m app.repository_analysis /path/to/local/checkout
 ```
 
-The CLI emits JSON. Default limits are 1,500 files, 1 MB per file, 20 MB total input, and 500 findings. It skips common dependency/build/VCS directories and symbolic links; detected secret values are redacted from evidence. It does not execute repository code, install dependencies, contact GitHub, query vulnerability databases, or make network requests.
+The CLI emits JSON. Default limits are 1,500 files, 1 MB per file, 20 MB total input, and 500 findings. It skips common dependency/build/VCS directories and symbolic links; detected secret values are redacted from evidence. It does not execute repository code, install dependencies, contact GitHub, query vulnerability databases, or make network requests. Dependency inventory is not an advisory scan and does not establish whether a package version is vulnerable.
 
 This is an initial prototype: Python dangerous-call checks use the standard-library AST, while cross-language/configuration rules are lexical and line-based. It is not CodeQL, Semgrep, dependency auditing, data-flow/reachability analysis, or a complete SAST product. Results are labelled **suspected** and need human review. It is currently a local CLI, not connected to the API, dashboard, or GitHub App. Only analyse repositories you own or are authorised to assess.
 
