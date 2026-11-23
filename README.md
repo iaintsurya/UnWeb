@@ -213,3 +213,6 @@ When a website scan and repository analysis are both available, the dashboard's 
 ## Website scan authorisation
 
 The website scan API now requires the request field `authorised: true`; otherwise it returns HTTP 403 with `website_authorisation_required`. The dashboard exposes a consent checkbox and disables the Analyse action until it is checked. This is an explicit operator acknowledgement only: it does not authenticate the operator, verify ownership, establish legal permission, or replace a production scope/identity model. Requests are still bounded by the configured page, concurrency, time and rate limits, and the crawler remains same-origin.
+## Additional Python injection heuristic
+
+The read-only repository analyser now flags direct dynamically constructed SQL expressions passed to Python `execute`, `executemany`, and `executescript` calls. It checks f-string interpolation, string concatenation, `%` formatting and `.format()` calls, while leaving a literal SQL statement with separate bind parameters unflagged. Findings remain medium-confidence `suspected` indicators: the rule does not trace tainted values, understand ORM/query-builder semantics, or prove SQL injection.
