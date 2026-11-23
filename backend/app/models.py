@@ -50,3 +50,10 @@ class ScanResult(BaseModel):
     js_analysis: list[dict[str, object]] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     reconstruction: dict[str, str] | None = None
+
+
+
+class GitHubRepositoryScanRequest(BaseModel):
+    repository_url: str = Field(min_length=15, max_length=2048)
+    ref: str | None = Field(default=None, max_length=255)
+    authorised: bool = False
