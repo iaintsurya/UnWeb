@@ -7,11 +7,11 @@ import SitemapGraph from "./SitemapGraph";
 const API=API_BASE_URL;type Tab="Overview"|"Sitemap"|"JavaScript"|"Security"|"Reconstruction"|"Repository";
 function websiteEvidence(scan:ScanResult):CommonSecurityFinding[]{
  if(scan.security_findings?.length)return scan.security_findings;
- return scan.findings.map(f=>({finding_id:`legacy-${f.id}`,check_id:f.id,source:"website",target:scan.final_url,location:{kind:"url",value:scan.final_url},title:f.title,category:"security-configuration",severity:f.severity,confidence:f.confidence,validation_state:"observed",evidence:f.evidence,impact:null,preconditions:[],remediation:f.recommendation,scanner_version:"legacy",scope_id:null,observed_at:scan.scanned_at}));
+ return scan.findings.map(f=>({finding_id:`legacy-${f.id}`,check_id:f.id,source:"website",target:scan.final_url,location:{kind:"url" as const,value:scan.final_url},title:f.title,category:"security-configuration",severity:f.severity,confidence:f.confidence,validation_state:"observed" as const,evidence:f.evidence,impact:null,preconditions:[],remediation:f.recommendation,scanner_version:"legacy",scope_id:null,observed_at:scan.scanned_at}));
 }
 function repositoryEvidence(report:RepositoryReport):CommonSecurityFinding[]{
  if(report.security_findings?.length)return report.security_findings;
- return report.findings.map(f=>({finding_id:`legacy-${f.id}-${f.path}-${f.line}`,check_id:f.id,source:"repository",target:report.repository,location:{kind:"file",path:f.path,line:f.line},title:f.title,category:f.category,severity:f.severity,confidence:f.confidence,validation_state:f.validation_state,evidence:f.evidence,impact:null,preconditions:[],remediation:f.recommendation,scanner_version:report.scanner_version,scope_id:null}));
+ return report.findings.map(f=>({finding_id:`legacy-${f.id}-${f.path}-${f.line}`,check_id:f.id,source:"repository",target:report.repository,location:{kind:"file" as const,path:f.path,line:f.line},title:f.title,category:f.category,severity:f.severity,confidence:f.confidence,validation_state:f.validation_state,evidence:f.evidence,impact:null,preconditions:[],remediation:f.recommendation,scanner_version:report.scanner_version,scope_id:null}));
 }
 function findingLocation(f:CommonSecurityFinding):string{
  return f.location.kind==="url"?f.location.value:`${f.location.path}${f.location.line?":"+f.location.line:""}`;
