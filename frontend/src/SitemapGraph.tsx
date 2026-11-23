@@ -71,6 +71,22 @@ export default function SitemapGraph({ pages, edges }: Props) {
             const sy = source.y + NODE_HEIGHT / 2;
             const tx = target.x + NODE_WIDTH / 2;
             const ty = target.y + NODE_HEIGHT / 2;
+
+            if (edge.source === edge.target) {
+              const startX = source.x + NODE_WIDTH / 2;
+              const startY = source.y + NODE_HEIGHT;
+              const endX = source.x + NODE_WIDTH - 2;
+              const endY = source.y + NODE_HEIGHT / 2;
+              return (
+                <path
+                  key={`${edge.source}-${edge.target}-${index}`}
+                  d={`M ${startX} ${startY} C ${startX + 55} ${startY + 45}, ${endX + 48} ${startY + 28}, ${endX} ${endY}`}
+                  className="sitemap-edge"
+                  markerEnd="url(#sitemap-arrow)"
+                />
+              );
+            }
+
             const dx = tx - sx;
             const dy = ty - sy;
             const distance = Math.max(1, Math.hypot(dx, dy));
