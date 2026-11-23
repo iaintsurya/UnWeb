@@ -24,6 +24,8 @@ MAX_TOTAL_BYTES = 20_000_000
 MAX_FILES = 1_500
 MAX_FINDINGS = 500
 MAX_DEPENDENCY_RECORDS = 5_000
+MAX_ROUTE_RECORDS = 2_000
+HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
 MAX_ARCHIVE_BYTES = 50_000_000
 MAX_ARCHIVE_ENTRIES = 6_000
 SKIP_DIRS = {
@@ -74,6 +76,15 @@ class RepositoryFinding:
 
 
 @dataclass(frozen=True)
+class RepositoryRoute:
+    method: str
+    path: str
+    source_path: str
+    line: int
+    syntax: str
+
+
+@dataclass(frozen=True)
 class DependencyRecord:
     name: str
     ecosystem: str
@@ -90,6 +101,8 @@ class RepositoryReport:
     scanner_version: str
     findings: list[RepositoryFinding]
     dependency_inventory: list[DependencyRecord]
+    route_inventory: list[RepositoryRoute]
+    route_inventory_truncated: bool
     files_scanned: int
     bytes_scanned: int
     skipped_files: int
@@ -106,6 +119,9 @@ class RepositoryReport:
                 self.findings, self.repository, scanner_version=self.scanner_version
             ),
             "dependency_inventory": [asdict(item) for item in self.dependency_inventory],
+            "route_inventory": [asdict(item) for item in self.route_inventory],
+            "route_count": len(self.route_inventory),
+            "route_inventory_truncated": self.route_inventory_truncated,
             "dependency_count": len(self.dependency_inventory),
             "dependency_inventory_truncated": self.dependency_inventory_truncated,
             "files_scanned": self.files_scanned,
@@ -354,6 +370,181 @@ def _analyse_python_ast(
 
 
 
+def _valid_literal_route(value: str) -> bool:
+    return (
+        value.startswith("/")
+        and len(value) <= 512
+        and not any(char in value for char in ("?", "#", "\\", "\r", "\n"))
+        and all(ord(char) >= 32 for char in value)
+    )
+
+
+def _python_routes(source: str, relative_path: str) -> list[RepositoryRoute]:
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, RecursionError, ValueError):
+        return []
+    routes: list[RepositoryRoute] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            name = _dotted_name(decorator.func).rsplit(".", 1)[-1].lower()
+            if name not in HTTP_METHODS and name not in {"route", "api_route"}:
+                continue
+            if not decorator.args or not isinstance(decorator.args[0], ast.Constant):
+                continue
+            route_path = decorator.args[0].value
+            if not isinstance(route_path, str) or not _valid_literal_route(route_path):
+                continue
+            methods = [name.upper()] if name in HTTP_METHODS else ["GET"]
+            if name in {"route", "api_route"}:
+                for keyword in decorator.keywords:
+                    if keyword.arg == "methods" and isinstance(keyword.value, (ast.List, ast.Tuple)):
+                        declared = [
+                            item.value.upper()
+                            for item in keyword.value.elts
+                            if isinstance(item, ast.Constant)
+                            and isinstance(item.value, str)
+                            and item.value.upper() in HTTP_METHODS
+                        ]
+                        if declared:
+                            methods = list(dict.fromkeys(declared))
+                        break
+            for method in methods:
+                routes.append(RepositoryRoute(
+                    method=method,
+                    path=route_path,
+                    source_path=relative_path,
+                    line=getattr(decorator, "lineno", getattr(node, "lineno", 1)),
+                    syntax="python-decorator",
+                ))
+    return routes
+
+
+def _mask_javascript_comments(source: str) -> str:
+    """Mask JS/TS comments while preserving strings, offsets and line numbers."""
+    chars = list(source)
+    index = 0
+    quote: str | None = None
+    while index < len(chars):
+        char = chars[index]
+        following = chars[index + 1] if index + 1 < len(chars) else ""
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"', chr(96)}:
+            quote = char
+            index += 1
+            continue
+        if char == "/" and following == "/":
+            chars[index] = chars[index + 1] = " "
+            index += 2
+            while index < len(chars) and chars[index] not in {"\r", "\n"}:
+                chars[index] = " "
+                index += 1
+            continue
+        if char == "/" and following == "*":
+            chars[index] = chars[index + 1] = " "
+            index += 2
+            while index < len(chars):
+                if chars[index] == "*" and index + 1 < len(chars) and chars[index + 1] == "/":
+                    chars[index] = chars[index + 1] = " "
+                    index += 2
+                    break
+                if chars[index] not in {"\r", "\n"}:
+                    chars[index] = " "
+                index += 1
+            continue
+        index += 1
+    return "".join(chars)
+
+
+_JS_ROUTE_CALL = re.compile(
+    r"""\b[A-Za-z_$][\w$]*\s*\.\s*(?P<method>get|post|put|patch|delete|options|head|route)\s*\(\s*(?P<quote>["'])(?P<path>/[^"'\\\r\n]{0,511})(?P=quote)""",
+    re.IGNORECASE,
+)
+_GO_ROUTE_CALL = re.compile(
+    r"""\b(?:http\s*\.\s*HandleFunc|[A-Za-z_]\w*\s*\.\s*HandleFunc|[A-Za-z_]\w*\s*\.\s*Handle)\s*\(\s*"(?P<path>/[^"\\\r\n]{0,511})"""
+)
+_SPRING_ROUTE = re.compile(
+    r"""@(?P<annotation>Get|Post|Put|Patch|Delete|Request)Mapping\s*\(\s*(?:(?:value|path)\s*=\s*)?["'](?P<path>/[^"'\\\r\n]{0,511})["']""",
+    re.IGNORECASE,
+)
+_PHP_ROUTE = re.compile(
+    r"""\bRoute\s*::\s*(?P<method>get|post|put|patch|delete|options|any)\s*\(\s*['"](?P<path>/[^"'\\\r\n]{0,511})['"]""",
+    re.IGNORECASE,
+)
+_RUBY_ROUTE = re.compile(
+    r"""^\s*(?P<method>get|post|put|patch|delete)\s+['"](?P<path>/[^"'\\\r\n]{0,511})['"]""",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _extract_repository_routes(
+    path: Path,
+    content: str,
+    relative_path: str,
+) -> list[RepositoryRoute]:
+    """Extract literal route declarations without executing repository code."""
+    suffix = path.suffix.lower()
+    if suffix in {".py", ".pyi"}:
+        return _python_routes(content, relative_path)
+
+    routes: list[RepositoryRoute] = []
+    patterns: list[tuple[re.Pattern[str], str, str]] = []
+    if suffix in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}:
+        patterns.append((_JS_ROUTE_CALL, "method", "javascript-method-call"))
+        source = _mask_javascript_comments(content)
+    elif suffix == ".go":
+        patterns.append((_GO_ROUTE_CALL, "ANY", "go-handler"))
+        source = content
+    elif suffix in {".java", ".kt"}:
+        patterns.append((_SPRING_ROUTE, "annotation", "spring-annotation"))
+        source = content
+    elif suffix == ".php":
+        patterns.append((_PHP_ROUTE, "method", "php-route-call"))
+        source = content
+    elif suffix == ".rb":
+        patterns.append((_RUBY_ROUTE, "method", "ruby-route-call"))
+        source = content
+    else:
+        return []
+
+    for pattern, method_field, syntax in patterns:
+        for match in pattern.finditer(source):
+            route_path = match.group("path")
+            if not _valid_literal_route(route_path):
+                continue
+            raw_method = match.group(method_field) if method_field != "ANY" else "ANY"
+            if method_field == "annotation":
+                method = {
+                    "get": "GET", "post": "POST", "put": "PUT",
+                    "patch": "PATCH", "delete": "DELETE",
+                }.get(raw_method.lower(), "ANY")
+            else:
+                method = (
+                    raw_method.upper()
+                    if raw_method.upper() in HTTP_METHODS or raw_method.upper() == "ANY"
+                    else "ANY"
+                )
+            routes.append(RepositoryRoute(
+                method=method,
+                path=route_path,
+                source_path=relative_path,
+                line=source.count("\n", 0, match.start()) + 1,
+                syntax=syntax,
+            ))
+    return routes
+
+
 def _dependency_from_requirement(
     requirement: str, ecosystem: str, source_path: str, group: str
 ) -> DependencyRecord | None:
@@ -593,6 +784,9 @@ def analyse_repository(
 
     findings: list[RepositoryFinding] = []
     dependency_inventory: list[DependencyRecord] = []
+    route_inventory: list[RepositoryRoute] = []
+    route_inventory_truncated = False
+    seen_routes: set[tuple[str, str, str, int, str]] = set()
     dependency_inventory_truncated = False
     seen: set[tuple[str, str, int]] = set()
     files_scanned = bytes_scanned = skipped_files = 0
@@ -644,6 +838,18 @@ def analyse_repository(
                 dependency_inventory_truncated = True
             else:
                 dependency_inventory.extend(extracted_dependencies)
+        for route in _extract_repository_routes(path, content, relative_path):
+            route_key = (
+                route.method, route.path, route.source_path, route.line, route.syntax
+            )
+            if route_key in seen_routes:
+                continue
+            seen_routes.add(route_key)
+            if len(route_inventory) >= MAX_ROUTE_RECORDS:
+                route_inventory_truncated = True
+                break
+            route_inventory.append(route)
+
         file_findings: list[RepositoryFinding] = []
         for line_number, line in enumerate(content.splitlines(), start=1):
             file_findings.extend(_analyse_line(path, relative_path, line_number, line))
@@ -664,8 +870,10 @@ def analyse_repository(
     return RepositoryReport(
         repository=root.name, scanner_version="0.2.0", findings=findings,
         dependency_inventory=dependency_inventory,
+        route_inventory=route_inventory,
+        route_inventory_truncated=route_inventory_truncated,
         files_scanned=files_scanned, bytes_scanned=bytes_scanned,
-        skipped_files=skipped_files, truncated=truncated or dependency_inventory_truncated,
+        skipped_files=skipped_files, truncated=truncated or dependency_inventory_truncated or route_inventory_truncated,
         limitations=[
             "Python dangerous-call checks use AST; cross-language/configuration checks are lexical and line-based. No control-flow, data-flow, or reachability analysis is performed.",
             "Findings are suspected indicators, not validated vulnerabilities.",
@@ -673,6 +881,8 @@ def analyse_repository(
             "Dependency manifests and lockfiles are inventoried, but no advisory database is queried and no vulnerable-version conclusion is made.",
             "Coverage is limited to supported source/configuration types and bounded scan budgets.",
             "Dependency inventory is capped at 5,000 records; the report marks when additional records may have been omitted.",
+            "Route inventory covers literal Python decorator routes and lexical JavaScript/TypeScript, Go, Spring-style, PHP, and Ruby declarations; dynamic paths and router composition are not resolved.",
+            "Route inventory is capped at 2,000 records; the report marks when additional routes may have been omitted.",
         ],
         dependency_inventory_truncated=dependency_inventory_truncated,
     )
