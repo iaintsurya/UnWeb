@@ -53,3 +53,29 @@ def test_scan_api_returns_404_for_unknown_saved_scan(tmp_path, monkeypatch):
         response = client.get("/api/scans/does-not-exist")
 
     assert response.status_code == 404
+
+
+
+def test_scan_api_returns_retry_after_when_rate_limited(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "limited.sqlite3")
+    monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(1, 60))
+
+    async def fake_scan_site(url, max_pages, include_reconstruction):
+        return make_result()
+
+    monkeypatch.setattr(main, "scan_site", fake_scan_site)
+
+    with TestClient(main.app) as client:
+        first = client.post(
+            "/api/scans",
+            json={"url": "https://example.com/", "max_pages": 4},
+        )
+        second = client.post(
+            "/api/scans",
+            json={"url": "https://example.com/", "max_pages": 4},
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["retry-after"]
+    assert second.json()["detail"]["code"] == "scan_rate_limited"
