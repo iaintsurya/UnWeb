@@ -1,10 +1,37 @@
 # UnWeb
 
-**A website reverse-engineering, intelligence, and reconstruction platform.**
+**An authorised web application security assessment and vulnerability validation platform.**
 
-UnWeb gathers bounded, publicly observable website evidence; extracts metadata and assets across discovered pages; maps same-origin page relationships; inspects delivered JavaScript for comment-aware route, framework, and source-map clues; reports passive security observations; and generates a structured React starter with a script-free HTML preview.
+UnWeb is being built to help website owners and defenders discover attack surface, identify likely security weaknesses, safely validate whether findings are exploitable, understand their impact, and fix them before attackers can abuse them. Website structure, JavaScript clues, browser observations, and reconstruction are supporting evidence—not the product's primary purpose.
+
+**Core workflow:** define authorised scope → map the attack surface → run bounded security checks → validate findings safely → explain impact and evidence → recommend fixes → retest.
 
 > Early engineering preview — not production-ready. Use only on sites you own or are explicitly authorised to analyse.
+
+## Security assessment model
+
+UnWeb is intended for websites and APIs that the operator owns or is explicitly authorised to assess. The first release is a bounded passive reconnaissance and evidence-collection preview; the current scanner is **not yet a full vulnerability scanner or penetration-testing engine**. It currently collects HTML, same-origin page relationships, assets, JavaScript clues, selected response headers, and optional browser-render evidence. Those observations can inform an assessment, but they do not prove that a vulnerability exists.
+
+The planned assessment workflow is:
+
+1. **Scope and authorisation:** record the approved hostnames, schemes, ports, paths, test window, request budget, and permitted test profile. Out-of-scope redirects and hosts must be denied.
+2. **Attack-surface discovery:** inventory pages, API routes, scripts, forms, assets, technologies, security headers, and browser-observed requests.
+3. **Vulnerability checks:** run explicit, bounded checks against the authorised target. Start with passive and low-impact checks before any active validation.
+4. **Safe validation:** use benign proof markers, controlled test accounts, or an owner-provided test environment to verify suspected issues. Do not steal data, change real user records, persist access, evade controls, or cause service disruption.
+5. **Evidence and impact:** record the affected URL/component, check identifier, timestamp, evidence, confidence, preconditions, potential impact, and whether validation was passive, active, or inconclusive.
+6. **Remediation and retest:** provide concrete fixes and a repeatable retest that can confirm whether the issue is resolved.
+
+### Initial security coverage priorities
+
+Use the [OWASP Web Security Testing Guide](https://wstg.owasp.org/) as the testing-method reference, the [OWASP Top 10:2025](https://owasp.org/Top10/2025/) as a high-level risk taxonomy, and the [OWASP API Security Top 10:2023](https://owasp.org/www-project-api-security/) for API-specific risks. These are coverage guides, not a claim that UnWeb currently detects every category.
+
+Planned checks will be introduced in levels:
+
+- **Passive:** TLS and security-header observations, exposed files and directories, technology/version clues, public API inventory, cookie attributes, and security-relevant configuration clues.
+- **Low-impact active:** bounded method and CORS checks, harmless input markers, endpoint behavior comparisons, and carefully rate-limited configuration probes.
+- **Controlled validation:** only with explicit authorisation and suitable test fixtures/accounts—for example, checking object-level authorization using two owner-provided test accounts and non-sensitive test records.
+
+High-impact testing such as destructive injection, denial-of-service, credential attacks, persistent payloads, real data extraction, or attempts to access cloud metadata/internal services is not an automatic scan feature. Those activities require a separately approved lab or manual assessment plan and must never be silently triggered by a URL scan.
 
 ## Stack
 
@@ -74,7 +101,7 @@ Set `UNWEB_DB_PATH` in the backend process environment to use a different databa
 - `GET /api/scans/{scan_id}/security`
 - `GET /api/scans/{scan_id}/reconstruction`
 
-The scan request accepts `max_pages` from 1 to 30. The UI offers 4, 8, 12, 20, and 30 page presets.
+The scan request accepts `max_pages` from 1 to 30. The UI offers 4, 8, 12, 20, and 30 page presets. These are discovery limits, not a security test profile.
 
 ## Optional Playwright browser worker
 
@@ -107,7 +134,7 @@ The `--confirm-isolated-egress` flag is an operator acknowledgement only. It doe
 
 Install locally for development with `cd backend && pip install -r requirements-browser.txt && python -m playwright install chromium`, but do not run the browser worker directly on a machine or network that lacks the external egress controls above. The feature is optional; the standard API and CI do not install browser binaries or depend on Playwright.
 
-This is a single unauthenticated render: it does not submit forms, bypass access controls, reuse your browser profile, or crawl links. Browser output is not yet persisted or shown in the web UI; durable isolated job orchestration is required before API integration.
+This is a single unauthenticated render: it does not submit forms, bypass access controls, reuse your browser profile, or crawl links. It is runtime evidence collection, not active vulnerability validation. Browser output is not yet persisted or shown in the web UI; durable isolated job orchestration is required before API integration.
 
 ## Tests
 
@@ -133,7 +160,7 @@ The preview API allows at most two active scans per process, applies a 120-secon
 
 **Important:** application-level DNS checks do not fully eliminate DNS rebinding or time-of-check/time-of-use risks. Before any public deployment, enforce outbound network filtering outside the app, isolate scan workers, set CPU/memory/concurrency limits, add authentication and rate limits, and conduct a security review. The local SQLite store is not designed for multi-instance deployment.
 
-UnWeb does not bypass authentication, CAPTCHAs, access controls, or rate limits. Technology and JavaScript matches are clues, not proof. Security checks are passive response observations, not a penetration test or an overall security verdict. Reconstruction is an editable starting point, not recovered source code or guaranteed pixel-perfect cloning.
+UnWeb does not bypass authentication, CAPTCHAs, access controls, or rate limits. Technology and JavaScript matches are clues, not proof. The current security observations are passive and do not establish exploitability; the current release is not a penetration test. Future active checks must require an explicit authorised scope and bounded profile, use non-destructive validation, and preserve evidence without collecting unnecessary sensitive data. A finding must distinguish confirmed, likely, informational, and inconclusive results. Reconstruction is an editable supporting feature, not recovered source code or guaranteed pixel-perfect cloning.
 
 ## Roadmap
 
