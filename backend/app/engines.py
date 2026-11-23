@@ -91,13 +91,240 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
         ))
     return findings
 
+def _decode_js_literal(value: str) -> str:
+    """Decode the small set of escapes useful for URL-like JS string literals."""
+    replacements = {
+        r"\\": "\\",
+        r"\/": "/",
+        r"\\'": "'",
+        r'\\"': '"',
+        r"\\`": "`",
+        r"\\n": "\n",
+        r"\\r": "\r",
+        r"\\t": "\t",
+    }
+    for encoded, decoded in replacements.items():
+        value = value.replace(encoded, decoded)
+    return value
+
+
+def _iter_js_string_literals(body: str):
+    """Yield string/template literal values while ignoring line/block comments.
+
+    This intentionally is not a full JavaScript parser. It records source offsets
+    and line numbers so every result can be shown as a traceable lexical clue.
+    """
+    index = 0
+    line = 1
+    length = len(body)
+
+    while index < length:
+        char = body[index]
+        next_char = body[index + 1] if index + 1 < length else ""
+
+        if char == "/" and next_char == "/":
+            index += 2
+            while index < length and body[index] not in "\r\n":
+                index += 1
+            continue
+
+        if char == "/" and next_char == "*":
+            index += 2
+            while index < length:
+                if body[index] == "\n":
+                    line += 1
+                if body[index] == "*" and index + 1 < length and body[index + 1] == "/":
+                    index += 2
+                    break
+                index += 1
+            continue
+
+        if char not in {"'", '"', "`"}:
+            if char == "\n":
+                line += 1
+            index += 1
+            continue
+
+        quote = char
+        start = index
+        literal_line = line
+        index += 1
+        chars = []
+        dynamic = False
+
+        while index < length:
+            current = body[index]
+            if current == "\\" and index + 1 < length:
+                escaped = body[index + 1]
+                chars.extend([current, escaped])
+                if escaped == "\n":
+                    line += 1
+                index += 2
+                continue
+
+            if quote == "`" and current == "$" and index + 1 < length and body[index + 1] == "{":
+                dynamic = True
+                break
+
+            if current == quote:
+                index += 1
+                break
+
+            chars.append(current)
+            if current == "\n":
+                line += 1
+            index += 1
+
+        value = _decode_js_literal("".join(chars))
+        if value:
+            yield {
+                "value": value,
+                "offset": start,
+                "line": literal_line,
+                "dynamic_template": dynamic,
+            }
+
+        # If a template contained an expression, skip its interpolation with
+        # brace-depth tracking and continue collecting any following literals.
+        if quote == "`" and dynamic:
+            depth = 1
+            index += 2
+            while index < length and depth:
+                current = body[index]
+                if current == "\n":
+                    line += 1
+                if current in {"'", '"', "`"}:
+                    nested_quote = current
+                    index += 1
+                    while index < length:
+                        item = body[index]
+                        if item == "\\":
+                            index += 2
+                            continue
+                        if item == "\n":
+                            line += 1
+                        index += 1
+                        if item == nested_quote:
+                            break
+                    continue
+                if current == "/" and index + 1 < length and body[index + 1] == "/":
+                    index += 2
+                    while index < length and body[index] not in "\r\n":
+                        index += 1
+                    continue
+                if current == "/" and index + 1 < length and body[index + 1] == "*":
+                    index += 2
+                    while index < length:
+                        if body[index] == "\n":
+                            line += 1
+                        if body[index] == "*" and index + 1 < length and body[index + 1] == "/":
+                            index += 2
+                            break
+                        index += 1
+                    continue
+                if current == "{":
+                    depth += 1
+                elif current == "}":
+                    depth -= 1
+                index += 1
+            if index < length and body[index] == "`":
+                index += 1
+
+
 def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
-    routes = sorted(set(re.findall(r"""['"`](/(?:api|v\d+|auth|graphql|admin)[^'"`\s]*)['"`]""", body)))[:100]
-    libraries = [name for name,pattern in [
-        ("React",r"\breact(?:-dom)?\b"),("Vue",r"\bvue(?:\.runtime)?\b"),
-        ("Angular",r"@angular/"),("jQuery",r"jQuery|\$\(")] if re.search(pattern,body,re.I)]
-    return {"url":script_url,"bytes_analyzed":len(body.encode("utf-8",errors="ignore")),
-        "routes":routes,"possible_libraries":libraries,
-        "source_mapping_url_reference":bool(re.search(r"sourceMappingURL\s*=\s*\S+",body)),
-        "method":"bounded lexical heuristics",
-        "limitations":"Strings are clues only; these lexical heuristics are not AST analysis and do not prove a route or dependency is active."}
+    """Extract explainable route, library, and source-map clues from a JS file."""
+    route_pattern = re.compile(r"^/(?:api|v\\d+|auth|graphql|admin)(?:/|$)", re.I)
+    call_context = re.compile(
+        r"(?:\\bfetch|\\baxios(?:\\.(get|post|put|patch|delete))?|"
+        r"\\b(?:get|post|put|patch|delete)\\s*\\(|"
+        r"\\b(?:url|path|endpoint)\\s*[:=])\\s*\\(?\\s*$",
+        re.I,
+    )
+    references = []
+    routes = []
+    for literal in _iter_js_string_literals(body):
+        value = literal["value"].strip()
+        if len(value) > 500 or not route_pattern.match(value):
+            continue
+
+        offset = int(literal["offset"])
+        prefix = body[max(0, offset - 180):offset]
+        line_start = body.rfind("\\n", 0, offset) + 1
+        line_end = body.find("\\n", offset)
+        if line_end < 0:
+            line_end = len(body)
+        source_line = body[line_start:line_end].strip()[:180]
+
+        context_match = call_context.search(prefix)
+        confidence = "high" if context_match else "medium"
+        method = context_match.group(1).upper() if context_match and context_match.group(1) else None
+        context = "network-call-or-url-field" if context_match else "route-like-string"
+        item = {
+            "url": value,
+            "line": literal["line"],
+            "confidence": confidence,
+            "context": context,
+            "dynamic_template_prefix": bool(literal["dynamic_template"]),
+            "evidence": source_line,
+        }
+        if method:
+            item["method"] = method
+        references.append(item)
+        if value not in routes:
+            routes.append(value)
+        if len(references) >= 100:
+            break
+
+    library_rules = [
+        ("React", r"React\\.createElement|__REACT_DEVTOOLS_GLOBAL_HOOK__|react-dom/(?:client|server)|from\\s*[\"']react[\"']"),
+        ("Next.js", r"__NEXT_DATA__|next/(?:router|navigation)|/_next/(?:static|image)|next/font"),
+        ("Vue", r"createApp\\s*\\(|from\\s*[\"']vue[\"']|__VUE__"),
+        ("Angular", r"@angular/core|ng-version=|ɵɵdefineComponent"),
+        ("jQuery", r"jQuery(?:\\.fn)?|window\\.\\$|\\$\\(\\s*(?:document|[\"'])"),
+        ("Svelte", r"svelte/internal|svelte-hmr"),
+        ("Astro", r"astro-island|astro:"),
+    ]
+    libraries = []
+    library_evidence = []
+    for name, pattern in library_rules:
+        match = re.search(pattern, body, re.I)
+        if match:
+            libraries.append(name)
+            evidence = body[max(0, match.start() - 45):min(len(body), match.end() + 65)].replace("\\n", " ")[:140]
+            library_evidence.append({
+                "name": name,
+                "confidence": "medium",
+                "evidence": evidence,
+                "offset": match.start(),
+            })
+
+    source_maps = []
+    for match in re.finditer(
+        r"(?://#|//@|/\\*[#@])\\s*sourceMappingURL\\s*=\\s*([^\\s*]+)",
+        body,
+    ):
+        source_maps.append({
+            "reference": match.group(1).strip().rstrip("*/"),
+            "line": body.count("\\n", 0, match.start()) + 1,
+        })
+        if len(source_maps) >= 10:
+            break
+
+    byte_count = len(body.encode("utf-8", errors="ignore"))
+    return {
+        "url": script_url,
+        "bytes_analyzed": byte_count,
+        "line_count": body.count("\\n") + 1,
+        "routes": routes,
+        "route_references": references,
+        "possible_libraries": libraries,
+        "library_evidence": library_evidence,
+        "source_mapping_url_reference": bool(source_maps),
+        "source_map_references": source_maps,
+        "method": "comment-aware lexical heuristics",
+        "limitations": (
+            "Not AST analysis: string paths, framework markers, and source-map comments "
+            "are evidence clues only. They do not prove a route is reachable, a library "
+            "is active, or a source map is publicly available."
+        ),
+    }
