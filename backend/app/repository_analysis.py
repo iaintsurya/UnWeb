@@ -919,6 +919,7 @@ def analyse_repository(
         skipped_files=skipped_files, truncated=truncated or dependency_inventory_truncated or route_inventory_truncated,
         limitations=[
             "Python dangerous-call checks use AST; cross-language/configuration checks are lexical and line-based. No control-flow, data-flow, or reachability analysis is performed.",
+            "The Python dynamic-SQL rule only flags direct interpolated/concatenated query expressions passed to execute-style calls; it does not perform data-flow analysis or validate exploitability.",
             "Findings are suspected indicators, not validated vulnerabilities.",
             "No repository code is executed and no network requests are made.",
             "Dependency manifests and lockfiles are inventoried, but no advisory database is queried and no vulnerable-version conclusion is made.",
