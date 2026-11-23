@@ -75,3 +75,12 @@ def test_cookie_attribute_parser_handles_multiple_set_cookie_lines():
     assert "cookie-sid-missing-secure" in ids
     assert "cookie-sid-missing-httponly" in ids
     assert "cookie-sid-missing-samesite" in ids
+
+
+
+def test_cookie_header_lookup_is_case_insensitive():
+    findings = analyze_security(
+        {"Set-Cookie": "sid=redacted; Path=/"},
+        "https://example.com/",
+    )
+    assert any(item.id == "cookie-sid-missing-secure" for item in findings)
