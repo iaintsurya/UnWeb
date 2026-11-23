@@ -1,7 +1,7 @@
 import asyncio
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import database
@@ -47,7 +47,7 @@ async def health():
 
 
 @app.post("/api/scans", response_model=ScanResult)
-async def create_scan(payload: ScanRequest, request: Request):
+async def create_scan(payload: ScanRequest):
     acquired = False
     try:
         try:
