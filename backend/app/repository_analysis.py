@@ -10,6 +10,9 @@ import ast
 import json
 import os
 import re
+import stat
+import tempfile
+import zipfile
 import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -19,6 +22,8 @@ MAX_FILE_BYTES = 1_000_000
 MAX_TOTAL_BYTES = 20_000_000
 MAX_FILES = 1_500
 MAX_FINDINGS = 500
+MAX_ARCHIVE_BYTES = 50_000_000
+MAX_ARCHIVE_ENTRIES = 6_000
 SKIP_DIRS = {
     ".git", ".hg", ".svn", ".venv", "venv", "env", "__pycache__",
     "node_modules", "vendor", "dist", "build", "coverage", ".next",
@@ -622,17 +627,145 @@ def analyse_repository(
     )
 
 
+
+def analyse_repository_archive(
+    archive_path: str | Path, *,
+    max_files: int = MAX_FILES,
+    max_total_bytes: int = MAX_TOTAL_BYTES,
+    max_file_bytes: int = MAX_FILE_BYTES,
+    max_archive_bytes: int = MAX_ARCHIVE_BYTES,
+) -> RepositoryReport:
+    """Safely inspect a repository ZIP without executing or networking."""
+    archive = Path(archive_path).expanduser()
+    if archive.is_symlink():
+        raise ValueError("Archive must not be a symbolic link.")
+    try:
+        archive_stat = archive.stat()
+    except OSError as exc:
+        raise ValueError("Archive does not exist or cannot be accessed.") from exc
+    if not stat.S_ISREG(archive_stat.st_mode):
+        raise ValueError("Archive path must be a regular file.")
+    if archive_stat.st_size > max_archive_bytes:
+        raise ValueError("Archive exceeds the compressed input size limit.")
+    if max_files < 1 or max_total_bytes < 1 or max_file_bytes < 1 or max_archive_bytes < 1:
+        raise ValueError("Repository scan limits must be positive.")
+
+    try:
+        zipped = zipfile.ZipFile(archive)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise ValueError("Input is not a valid ZIP archive.") from exc
+
+    skipped = 0
+    accepted = 0
+    actual_bytes = 0
+    truncated = False
+    seen_paths: set[str] = set()
+
+    with zipped, tempfile.TemporaryDirectory(prefix="unweb-repo-") as temporary:
+        root = Path(temporary).resolve()
+        infos = zipped.infolist()
+        if len(infos) > MAX_ARCHIVE_ENTRIES:
+            raise ValueError("Archive contains too many entries.")
+
+        for info in infos:
+            if info.is_dir():
+                continue
+            raw_name = info.filename
+            # ZIP paths use forward slashes. Reject ambiguous Windows separators,
+            # absolute paths, drive prefixes, traversal and NUL bytes.
+            if (
+                not raw_name
+                or "\x00" in raw_name
+                or "\\" in raw_name
+                or raw_name.startswith("/")
+                or re.match(r"^[A-Za-z]:", raw_name)
+            ):
+                skipped += 1
+                continue
+            parts = Path(raw_name).parts
+            if any(part in {"", ".", ".."} for part in parts):
+                skipped += 1
+                continue
+            normalized = "/".join(parts)
+            if normalized in seen_paths:
+                skipped += 1
+                continue
+            seen_paths.add(normalized)
+
+            mode = (info.external_attr >> 16) & 0o170000
+            if mode == stat.S_IFLNK or (mode not in {0, stat.S_IFREG}):
+                skipped += 1
+                continue
+
+            relative = Path(*parts)
+            if not _is_candidate(relative):
+                continue
+            if accepted >= max_files or actual_bytes >= max_total_bytes:
+                truncated = True
+                break
+            if info.file_size > max_file_bytes or info.file_size > max_total_bytes - actual_bytes:
+                skipped += 1
+                truncated = True
+                continue
+
+            target = (root / relative).resolve()
+            if root not in target.parents:
+                skipped += 1
+                continue
+
+            try:
+                with zipped.open(info, "r") as source:
+                    content = source.read(max_file_bytes + 1)
+            except (OSError, RuntimeError, zipfile.BadZipFile, NotImplementedError):
+                skipped += 1
+                continue
+            if len(content) > max_file_bytes or len(content) != info.file_size or b"\x00" in content:
+                skipped += 1
+                continue
+            try:
+                content.decode("utf-8")
+            except UnicodeDecodeError:
+                skipped += 1
+                continue
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # We created the temporary parent tree ourselves and reject paths
+            # that resolve outside it; files are created exclusively.
+            try:
+                with target.open("xb") as destination:
+                    destination.write(content)
+            except OSError:
+                skipped += 1
+                continue
+            accepted += 1
+            actual_bytes += len(content)
+
+        report = analyse_repository(
+            root,
+            max_files=max_files,
+            max_total_bytes=max_total_bytes,
+            max_file_bytes=max_file_bytes,
+        )
+        report.repository = archive.stem
+        report.skipped_files += skipped
+        report.truncated = report.truncated or truncated
+        return report
+
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run bounded, read-only UnWeb checks on a local repository checkout."
     )
     parser.add_argument("repository", help="Path to a local repository checkout")
+    parser.add_argument("--archive", action="store_true", help="Treat input as a bounded ZIP archive")
     parser.add_argument("--max-files", type=int, default=MAX_FILES)
     parser.add_argument("--max-total-bytes", type=int, default=MAX_TOTAL_BYTES)
     parser.add_argument("--max-file-bytes", type=int, default=MAX_FILE_BYTES)
     args = parser.parse_args()
     try:
-        report = analyse_repository(
+        analyser = analyse_repository_archive if args.archive else analyse_repository
+        report = analyser(
             args.repository, max_files=args.max_files,
             max_total_bytes=args.max_total_bytes, max_file_bytes=args.max_file_bytes,
         )
