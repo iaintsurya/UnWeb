@@ -40,7 +40,16 @@ Use established public references as a baseline:
 
 These references are coverage guidance, not claims about current UnWeb functionality. Every check needs its own implementation, fixtures, expected evidence, limitations and remediation.
 
-## Safe validation policy
+## Implemented local repository-analysis preview
+
+A first read-only repository analyser is available as a local CLI at `backend/app/repository_analysis.py`. It scans selected source and configuration files for:
+
+- credential-like assignments, selected provider-token patterns, and private-key PEM markers (with values omitted/redacted);
+- Python dynamic evaluation, shell-enabled subprocess calls, `os.system`, YAML loading without a visible SafeLoader, and pickle deserialization;
+- disabled TLS certificate verification and wildcard CORS configuration.
+
+It applies file-count and byte budgets, skips common vendor/build/VCS folders and symlinks, and never executes repository code or makes network requests. Findings are heuristic and have the state `suspected`; this is not AST/data-flow analysis, dependency vulnerability analysis, or complete SAST coverage. The CLI is not yet integrated with GitHub, the website scanner, API, or dashboard. Its tests run on temporary local fixtures only.
+
 
 Default to passive mode. Active checks require explicit authorisation, scope validation and a bounded profile. Use benign markers, synthetic test records, and owner-provided test accounts. Do not automatically perform destructive writes, denial-of-service tests, credential attacks, persistence, stealth/evasion, broad data extraction, or attempts to access cloud metadata/internal services. High-impact techniques belong in a separately approved lab or manual assessment plan.
 
