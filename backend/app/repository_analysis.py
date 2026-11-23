@@ -6,6 +6,7 @@ requests are made. Results are heuristic indicators, not validated findings.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -197,46 +198,6 @@ def _analyse_line(
             "Remove the private key from source control, rotate the associated credential, and store keys in a protected secret store.",
         ))
 
-    if suffix in {".py", ".pyi"}:
-        if re.search(r"\b(?:eval|exec)\s*\(", line):
-            findings.append(_finding(
-                "python-dynamic-evaluation", "injection",
-                "Python dynamic evaluation call observed", "medium", "medium",
-                relative_path, line_number, safe_line,
-                "Avoid evaluating data as code. Use a constrained parser or explicit operation mapping.",
-            ))
-        if (
-            re.search(r"\bsubprocess\.(?:run|Popen|call|check_call|check_output)\s*\(", line)
-            and re.search(r"\bshell\s*=\s*True\b", line)
-        ):
-            findings.append(_finding(
-                "python-subprocess-shell-true", "command-execution",
-                "Subprocess is invoked with shell=True", "medium", "medium",
-                relative_path, line_number, safe_line,
-                "Prefer an argument list with shell=False. Never concatenate untrusted input into a shell command.",
-            ))
-        if re.search(r"\bos\.system\s*\(", line):
-            findings.append(_finding(
-                "python-os-system", "command-execution",
-                "os.system command execution call observed", "medium", "low",
-                relative_path, line_number, safe_line,
-                "Prefer subprocess with an argument list and shell=False; validate and constrain command arguments.",
-            ))
-        if re.search(r"\byaml\.load\s*\(", line) and not re.search(r"\bSafeLoader\b", line):
-            findings.append(_finding(
-                "python-yaml-load", "unsafe-deserialization",
-                "YAML load call without a visible SafeLoader", "medium", "medium",
-                relative_path, line_number, safe_line,
-                "Use yaml.safe_load for untrusted YAML, or pass yaml.SafeLoader explicitly.",
-            ))
-        if re.search(r"\bpickle\.(?:load|loads)\s*\(", line):
-            findings.append(_finding(
-                "python-pickle-load", "unsafe-deserialization",
-                "Python pickle deserialization call observed", "high", "medium",
-                relative_path, line_number, safe_line,
-                "Do not unpickle untrusted or attacker-controlled data. Prefer a non-executable serialization format.",
-            ))
-
     if re.search(r"\bverify\s*=\s*False\b", line, re.I):
         findings.append(_finding(
             "tls-certificate-verification-disabled", "transport-security",
@@ -263,6 +224,103 @@ def _analyse_line(
             relative_path, line_number, safe_line,
             "Restrict cross-origin access to required trusted origins. Review credential handling and browser access requirements.",
         ))
+
+    return findings
+
+
+
+def _dotted_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _analyse_python_ast(
+    source: str, relative_path: str
+) -> list[RepositoryFinding]:
+    """Inspect Python syntax trees without importing or executing repository code."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
+    lines = source.splitlines()
+    findings: list[RepositoryFinding] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = _dotted_name(node.func)
+        line_number = getattr(node, "lineno", 1)
+        source_line = lines[line_number - 1] if 0 < line_number <= len(lines) else ""
+        evidence = _redact_evidence(source_line)
+
+        if function in {"eval", "exec"}:
+            findings.append(_finding(
+                "python-dynamic-evaluation", "injection",
+                "Python dynamic evaluation call observed", "medium", "medium",
+                relative_path, line_number, evidence,
+                "Avoid evaluating data as code. Use a constrained parser or explicit operation mapping.",
+            ))
+        elif function in {
+            "subprocess.run", "subprocess.Popen", "subprocess.call",
+            "subprocess.check_call", "subprocess.check_output",
+        }:
+            shell_enabled = any(
+                keyword.arg == "shell"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in node.keywords
+            )
+            if shell_enabled:
+                findings.append(_finding(
+                    "python-subprocess-shell-true", "command-execution",
+                    "Subprocess is invoked with shell=True", "medium", "medium",
+                    relative_path, line_number, evidence,
+                    "Prefer an argument list with shell=False. Never concatenate untrusted input into a shell command.",
+                ))
+        elif function == "os.system":
+            findings.append(_finding(
+                "python-os-system", "command-execution",
+                "os.system command execution call observed", "medium", "low",
+                relative_path, line_number, evidence,
+                "Prefer subprocess with an argument list and shell=False; validate and constrain command arguments.",
+            ))
+        elif function == "yaml.load":
+            has_safe_loader = any(
+                keyword.arg == "Loader"
+                and _dotted_name(keyword.value).endswith("SafeLoader")
+                for keyword in node.keywords
+            )
+            if not has_safe_loader:
+                findings.append(_finding(
+                    "python-yaml-load", "unsafe-deserialization",
+                    "YAML load call without SafeLoader", "medium", "medium",
+                    relative_path, line_number, evidence,
+                    "Use yaml.safe_load for untrusted YAML, or pass yaml.SafeLoader explicitly.",
+                ))
+        elif function in {"pickle.load", "pickle.loads"}:
+            findings.append(_finding(
+                "python-pickle-load", "unsafe-deserialization",
+                "Python pickle deserialization call observed", "high", "medium",
+                relative_path, line_number, evidence,
+                "Do not unpickle untrusted or attacker-controlled data. Prefer a non-executable serialization format.",
+            ))
+
+        if any(
+            keyword.arg == "verify"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is False
+            for keyword in node.keywords
+        ):
+            findings.append(_finding(
+                "tls-certificate-verification-disabled", "transport-security",
+                "TLS certificate verification is disabled", "medium", "high",
+                relative_path, line_number, evidence,
+                "Enable certificate verification and configure a trusted CA bundle instead of disabling TLS validation.",
+            ))
 
     return findings
 
@@ -326,15 +384,17 @@ def analyse_repository(
         files_scanned += 1
         bytes_scanned += len(raw)
         relative_path = path.relative_to(root).as_posix()
+        file_findings: list[RepositoryFinding] = []
         for line_number, line in enumerate(content.splitlines(), start=1):
-            for item in _analyse_line(path, relative_path, line_number, line):
-                key = (item.id, item.path, item.line)
-                if key in seen:
-                    continue
-                seen.add(key)
-                findings.append(item)
-                if len(findings) >= MAX_FINDINGS:
-                    break
+            file_findings.extend(_analyse_line(path, relative_path, line_number, line))
+        if path.suffix.lower() in {".py", ".pyi"}:
+            file_findings.extend(_analyse_python_ast(content, relative_path))
+        for item in file_findings:
+            key = (item.id, item.path, item.line)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(item)
             if len(findings) >= MAX_FINDINGS:
                 break
         if len(findings) >= MAX_FINDINGS:
