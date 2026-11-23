@@ -40,3 +40,6 @@ GitHub Actions runs the current backend suite and frontend build/tests on pushes
 ## Common finding schema tests
 
 The backend suite includes adapter tests for website and repository evidence, stable IDs for repeated check/location pairs, independent severity and confidence values, safe validation-state normalisation, and API exposure of the common records. Existing source-specific response fields remain covered for compatibility.
+## Repository route inventory tests
+
+Route inventory tests cover Python decorator methods, JavaScript/TypeScript route calls, comment/string false-positive guards, Go/Spring/PHP/Ruby lexical patterns, source locations, and explicit truncation at the 2,000-route budget. The checks remain static and do not execute repository code.
