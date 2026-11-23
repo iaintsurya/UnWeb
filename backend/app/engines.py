@@ -58,9 +58,37 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
         if key not in h:
             findings.append(Finding(id=f"missing-{key}", title=title, severity="low", confidence="high",
                 evidence=f"The inspected response did not include the {key} header.", recommendation=recommendation))
-    if urlsplit(final_url).scheme != "https":
-        findings.append(Finding(id="http-not-https", title="Final page uses HTTP", severity="medium", confidence="high",
-            evidence="The final page URL scheme was HTTP.", recommendation="Serve the site over HTTPS where appropriate."))
+    is_https = urlsplit(final_url).scheme == "https"
+    if not is_https:
+        findings.append(Finding(
+            id="http-not-https",
+            title="Final page uses HTTP",
+            severity="medium",
+            confidence="high",
+            evidence="The final page URL scheme was HTTP.",
+            recommendation="Serve the site over HTTPS where appropriate.",
+        ))
+    elif "strict-transport-security" not in h:
+        findings.append(Finding(
+            id="missing-strict-transport-security",
+            title="HTTP Strict Transport Security not detected",
+            severity="low",
+            confidence="high",
+            evidence="The inspected HTTPS response did not include the strict-transport-security header.",
+            recommendation="Consider enabling HSTS after confirming every relevant subdomain is HTTPS-ready.",
+        ))
+
+    csp = h.get("content-security-policy", "").lower()
+    has_frame_ancestors = "frame-ancestors" in csp
+    if "x-frame-options" not in h and not has_frame_ancestors:
+        findings.append(Finding(
+            id="missing-framing-protection",
+            title="Framing protection not detected",
+            severity="low",
+            confidence="medium",
+            evidence="The response did not include X-Frame-Options or a CSP frame-ancestors directive.",
+            recommendation="Set an appropriate Content-Security-Policy frame-ancestors directive, or X-Frame-Options for legacy browser support.",
+        ))
     return findings
 
 def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
