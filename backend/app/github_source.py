@@ -41,8 +41,12 @@ def parse_github_repository_url(repository_url: str) -> tuple[str, str]:
             or parsed.fragment
         ):
             raise ValueError
-        segments = [part for part in parsed.path.split("/") if part]
-        if len(segments) != 2:
+        # Reject duplicate separators instead of normalizing ambiguous paths.
+        path = parsed.path[:-1] if parsed.path.endswith("/") else parsed.path
+        if "//" in path or not path.startswith("/"):
+            raise ValueError
+        segments = path[1:].split("/")
+        if len(segments) != 2 or any(not part for part in segments):
             raise ValueError
         owner, repository = segments
         if repository.endswith(".git"):
@@ -129,7 +133,20 @@ async def fetch_github_repository_archive(
             metadata_response = await client.get(f"{GITHUB_API}{repository_path}")
             if metadata_response.status_code != 200:
                 raise _api_error(metadata_response)
-            metadata = metadata_response.json()
+            try:
+                metadata = metadata_response.json()
+            except ValueError as exc:
+                raise GitHubSourceError(
+                    "github_metadata_invalid",
+                    "GitHub returned invalid repository metadata.",
+                    502,
+                ) from exc
+            if not isinstance(metadata, dict):
+                raise GitHubSourceError(
+                    "github_metadata_invalid",
+                    "GitHub returned invalid repository metadata.",
+                    502,
+                )
             default_branch = metadata.get("default_branch")
             if not isinstance(default_branch, str):
                 raise GitHubSourceError(
@@ -145,7 +162,14 @@ async def fetch_github_repository_archive(
         )
         if commit_response.status_code != 200:
             raise _api_error(commit_response)
-        commit_data = commit_response.json()
+        try:
+            commit_data = commit_response.json()
+        except ValueError as exc:
+            raise GitHubSourceError(
+                "github_commit_identity_invalid",
+                "GitHub returned invalid commit metadata.",
+                502,
+            ) from exc
         commit = commit_data.get("sha") if isinstance(commit_data, dict) else None
         if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
             raise GitHubSourceError(
