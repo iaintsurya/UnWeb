@@ -10,4 +10,4 @@ export type ScanResult={id:string;requested_url:string;final_url:string;status_c
 
 export type RepositoryFinding={id:string;category:string;title:string;severity:string;confidence:string;path:string;line:number;validation_state:"suspected";evidence:string;recommendation:string};
 export type DependencyRecord={name:string;ecosystem:string;source_path:string;source_type:string;version_constraint?:string|null;resolved_version?:string|null;dependency_group:string};
-export type RepositoryReport={repository:string;scanner_version:string;findings:RepositoryFinding[];dependency_inventory:DependencyRecord[];dependency_count:number;files_scanned:number;bytes_scanned:number;skipped_files:number;truncated:boolean;limitations:string[]};
+export type RepositoryReport={repository:string;scanner_version:string;findings:RepositoryFinding[];dependency_inventory:DependencyRecord[];dependency_count:number;dependency_inventory_truncated:boolean;files_scanned:number;bytes_scanned:number;skipped_files:number;truncated:boolean;limitations:string[]};
