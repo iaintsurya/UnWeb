@@ -46,3 +46,6 @@ Route inventory tests cover Python decorator methods, JavaScript/TypeScript rout
 ## Website/repository correlation tests
 
 Frontend tests cover exact path overlap, query/trailing-slash normalisation, parameterised repository paths, known HTTP method conflicts, unknown JavaScript methods, dynamic-template confidence downgrades, and missing route-inventory handling. The correlation view must retain explicit limitations and never label a path overlap as a vulnerability.
+## Website scan authorisation tests
+
+The API test suite verifies that `POST /api/scans` returns HTTP 403 with `website_authorisation_required` when `authorised` is missing/false, and accepts the request only when the explicit acknowledgement is true. The UI disables submission until the consent checkbox is checked; this acknowledgement is not a substitute for production identity and target-scope enforcement.
