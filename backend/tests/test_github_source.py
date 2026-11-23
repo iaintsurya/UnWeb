@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 
@@ -36,8 +38,7 @@ def test_validate_github_ref_rejects_unsafe_or_ambiguous_refs(ref):
         github_source.validate_github_ref(ref)
 
 
-@pytest.mark.asyncio
-async def test_fetch_github_archive_resolves_default_branch_and_pins_commit(tmp_path, monkeypatch):
+def test_fetch_github_archive_resolves_default_branch_and_pins_commit(tmp_path, monkeypatch):
     archive_bytes = b"fake-zip-content"
     requested = []
 
@@ -64,9 +65,9 @@ async def test_fetch_github_archive_resolves_default_branch_and_pins_commit(tmp_
         lambda *args, **kwargs: original_client(*args, transport=transport, **kwargs),
     )
     destination = tmp_path / "repository.zip"
-    result = await github_source.fetch_github_repository_archive(
+    result = asyncio.run(github_source.fetch_github_repository_archive(
         "https://github.com/owner/repo", None, destination
-    )
+    ))
 
     assert destination.read_bytes() == archive_bytes
     assert result["full_name"] == "owner/repo"
@@ -77,8 +78,7 @@ async def test_fetch_github_archive_resolves_default_branch_and_pins_commit(tmp_
     assert any(COMMIT_SHA in url for url in requested)
 
 
-@pytest.mark.asyncio
-async def test_fetch_github_archive_rejects_redirect_to_unapproved_host(tmp_path, monkeypatch):
+def test_fetch_github_archive_rejects_redirect_to_unapproved_host(tmp_path, monkeypatch):
     def handler(request):
         if request.url.path == f"/repos/owner/repo/commits/{COMMIT_SHA}":
             return httpx.Response(200, json={"sha": COMMIT_SHA})
@@ -94,14 +94,13 @@ async def test_fetch_github_archive_rejects_redirect_to_unapproved_host(tmp_path
         lambda *args, **kwargs: original_client(*args, transport=transport, **kwargs),
     )
     with pytest.raises(github_source.GitHubSourceError) as error:
-        await github_source.fetch_github_repository_archive(
+        asyncio.run(github_source.fetch_github_repository_archive(
             "https://github.com/owner/repo", "main", tmp_path / "repository.zip"
-        )
+        ))
     assert error.value.code == "github_archive_redirect_rejected"
 
 
-@pytest.mark.asyncio
-async def test_fetch_github_archive_enforces_streamed_size_limit(tmp_path, monkeypatch):
+def test_fetch_github_archive_enforces_streamed_size_limit(tmp_path, monkeypatch):
     def handler(request):
         if request.url.path == f"/repos/owner/repo/commits/main":
             return httpx.Response(200, json={"sha": COMMIT_SHA})
