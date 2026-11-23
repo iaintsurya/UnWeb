@@ -46,6 +46,12 @@ Default to passive mode. Active checks require explicit authorisation, scope val
 
 Every request—including redirects, browser subresources, API calls and validation probes—must stay within the approved target scope and resource budget. A browser proxy is not a substitute for operating-system/container/network egress controls.
 
+
+
+## Implemented passive cookie observations
+
+The current entry-response analysis inspects individual `Set-Cookie` headers for the `Secure`, `HttpOnly`, and `SameSite` attributes, including the unsafe `SameSite=None` without `Secure` combination. These are low-impact configuration observations, not proof that a cookie is an authentication credential or that a vulnerability is exploitable. Findings retain the cookie name and missing attribute only. Raw cookie values are held only long enough for in-memory analysis and are stripped before scan headers are returned, displayed, or persisted. If a response contains malformed cookie syntax, UnWeb skips that cookie rather than guessing.
+
 ## Roadmap principle
 
 Prefer fewer checks with strong evidence, clear false-positive handling and useful remediation over a long list of weak signatures. UnWeb should say what it tested, what it found, what it did not test, and what it cannot prove.
