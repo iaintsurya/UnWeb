@@ -464,6 +464,7 @@ async def run_browser_intelligence(
                 },
                 "limitations": [
                     "This is one unauthenticated render; no login, form submission, or user interaction is performed.",
+                    "Cross-origin subresources are blocked, so styles or content served from third-party hosts may be missing from this render.",
                     "Captured network paths omit query strings and fragments; request bodies and headers are not stored.",
                     "Response byte counts are only those declared by Content-Length and are not a hard transfer cap.",
                     "The exact-origin CONNECT proxy is defence in depth; an external per-job egress firewall is mandatory.",
