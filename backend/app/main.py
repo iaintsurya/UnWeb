@@ -411,7 +411,10 @@ async def sitemap(scan_id: str):
 @app.get("/api/scans/{scan_id}/security")
 async def security(scan_id: str):
     result = await load_scan(scan_id)
-    return {"findings": result.findings}
+    return {
+        "findings": result.findings,
+        "security_findings": result.security_findings,
+    }
 
 
 @app.get("/api/scans/{scan_id}/reconstruction")
