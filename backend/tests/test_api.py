@@ -129,7 +129,7 @@ def test_repository_scan_api_returns_redacted_report_and_inventory(monkeypatch):
     assert response.status_code == 200
     report = response.json()
     assert report["repository"] == "sample-project"
-    assert report["files_scanned"] == 2
+    assert report["files_scanned"] == 3
     assert any(item["source"] == "repository" for item in report["security_findings"])
     assert any(item["path"] == "/api/health" for item in report["route_inventory"])
     assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
