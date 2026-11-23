@@ -124,7 +124,7 @@ def test_fetch_github_archive_enforces_streamed_size_limit(tmp_path, monkeypatch
         lambda *args, **kwargs: original_client(*args, transport=transport, **kwargs),
     )
     with pytest.raises(github_source.GitHubSourceError) as error:
-        await github_source.fetch_github_repository_archive(
+        asyncio.run(github_source.fetch_github_repository_archive(
             "https://github.com/owner/repo", "main", tmp_path / "repository.zip"
-        )
+        ))
     assert error.value.code == "github_archive_too_large"
