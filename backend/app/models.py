@@ -47,6 +47,7 @@ class ScanResult(BaseModel):
     pages: list[PageSummary] = Field(default_factory=list)
     edges: list[PageEdge] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
+    security_findings: list[dict[str, object]] = Field(default_factory=list)
     js_analysis: list[dict[str, object]] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     reconstruction: dict[str, str] | None = None
