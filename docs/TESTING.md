@@ -10,6 +10,10 @@ The optional browser-worker suite tests HTTPS-only target intake, CONNECT author
 
 Run the frontend checks with `cd frontend && npm ci && npm run build && npm test`. Vitest tests the shared API request helper's success and error handling plus sitemap graph empty/self-link rendering; the build runs TypeScript's strict project checks before bundling.
 
+## Repository-analysis regression coverage
+
+The local repository-analysis suite uses temporary fixture repositories and verifies credential/token/private-key redaction, placeholder filtering, heuristic rule matches, skip-directory behavior, symlink handling, file/byte limits, invalid-input handling, CLI JSON output, and the suspected validation state. It does not clone repositories, execute scanned code, or query external vulnerability sources.
+
 ## Security test requirements (planned)
 
 Before a vulnerability check is added, require tests for:
