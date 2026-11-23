@@ -406,7 +406,7 @@ def analyse_repository(
         files_scanned=files_scanned, bytes_scanned=bytes_scanned,
         skipped_files=skipped_files, truncated=truncated,
         limitations=[
-            "Lexical, line-based checks only; no AST, control-flow, data-flow, or reachability analysis.",
+            "Python dangerous-call checks use AST; cross-language/configuration checks are lexical and line-based. No control-flow, data-flow, or reachability analysis is performed.",
             "Findings are suspected indicators, not validated vulnerabilities.",
             "No repository code is executed and no network requests are made.",
             "Dependencies are not installed and dependency advisories are not queried.",
