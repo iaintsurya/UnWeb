@@ -143,3 +143,42 @@ def test_safe_fetch_rejects_off_origin_redirect_before_following(monkeypatch):
         )
 
     assert requested_urls == ["https://example.com/start"]
+
+
+
+def test_assets_and_scripts_are_collected_across_discovered_pages(monkeypatch):
+    root = (
+        b'<html><head><title>Home</title><script src="/root.js"></script>'
+        b'</head><body><a href="/about">About</a><img src="/hero.png"></body></html>'
+    )
+    about = (
+        b'<html><head><title>About</title><script src="/about.js"></script>'
+        b'<link rel="stylesheet" href="/about.css"></head><body>About</body></html>'
+    )
+    responses = {
+        "https://example.com/": ({"content-type": "text/html"}, root),
+        "https://example.com/about": ({"content-type": "text/html"}, about),
+        "https://example.com/root.js": ({"content-type": "text/javascript"}, b'fetch("/api/home")'),
+        "https://example.com/about.js": ({"content-type": "application/javascript"}, b'fetch("/api/about")'),
+    }
+    calls = []
+
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+        calls.append(url)
+        headers, body = responses[url]
+        return url, 200, headers, body
+
+    monkeypatch.setattr(scanner, "safe_fetch", fake_safe_fetch)
+    result = asyncio.run(
+        scanner.scan_site("https://example.com", max_pages=2, include_reconstruction=False)
+    )
+
+    asset_pairs = {(asset["kind"], asset["url"]) for asset in result.assets}
+    assert ("script", "https://example.com/root.js") in asset_pairs
+    assert ("script", "https://example.com/about.js") in asset_pairs
+    assert ("stylesheet", "https://example.com/about.css") in asset_pairs
+    assert ("image", "https://example.com/hero.png") in asset_pairs
+    assert {item["url"] for item in result.js_analysis} == {
+        "https://example.com/root.js",
+        "https://example.com/about.js",
+    }
