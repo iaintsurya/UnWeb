@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import stat
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -263,3 +265,78 @@ def test_inventories_cargo_and_go_manifests_and_lockfiles(tmp_path):
     assert any(item["name"] == "serde" and item["resolved_version"] == "1.0.210" for item in inventory)
     assert any(item["name"] == "pretty_assertions" and item["dependency_group"] == "dev-dependencies" for item in inventory)
     assert any(item["name"] == "github.com/pkg/errors" and item["version_constraint"] == "v0.9.1" for item in inventory)
+
+
+
+def test_scans_safe_repository_zip_and_redacts_secrets(tmp_path):
+    archive = tmp_path / "sample-repository.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("sample-repository/src/app.py", 'API_KEY="archive-secret-value-123"\neval(user_input)\n')
+        zipped.writestr("sample-repository/package.json", json.dumps({
+            "dependencies": {"express": "^4.18.0"}
+        }))
+    report = analyse_repository_archive(archive)
+    ids = {item.id for item in report.findings}
+    assert "possible-hardcoded-secret" in ids
+    assert "python-dynamic-evaluation" in ids
+    assert any(item.name == "express" for item in report.dependency_inventory)
+    rendered = json.dumps(report.to_dict())
+    assert "archive-secret-value-123" not in rendered
+    assert report.repository == "sample-repository"
+
+
+def test_zip_scanner_rejects_path_traversal_and_skips_symlink_entries(tmp_path):
+    archive = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("../outside.py", 'API_KEY="must-not-be-read"\n')
+        zipped.writestr("repo/src/app.py", "eval(user_input)\n")
+        link = zipfile.ZipInfo("repo/linked.py")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        zipped.writestr(link, "../outside.py")
+    report = analyse_repository_archive(archive)
+    assert any(item.id == "python-dynamic-evaluation" for item in report.findings)
+    assert not any(item.id == "possible-hardcoded-secret" for item in report.findings)
+    assert report.skipped_files >= 2
+    assert not (tmp_path / "outside.py").exists()
+
+
+def test_zip_scanner_enforces_archive_and_entry_budgets(tmp_path):
+    archive = tmp_path / "large.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("repo/large.py", "x" * 100)
+        zipped.writestr("repo/small.py", "eval(x)\n")
+    report = analyse_repository_archive(
+        archive,
+        max_file_bytes=50,
+        max_total_bytes=80,
+    )
+    assert report.bytes_scanned <= 80
+    assert report.skipped_files >= 1
+    assert report.truncated
+
+
+def test_zip_scanner_rejects_invalid_and_oversized_archives(tmp_path):
+    invalid = tmp_path / "not-a-zip.zip"
+    invalid.write_text("not a zip", encoding="utf-8")
+    with pytest.raises(ValueError, match="valid ZIP"):
+        analyse_repository_archive(invalid)
+    valid = tmp_path / "valid.zip"
+    with zipfile.ZipFile(valid, "w") as zipped:
+        zipped.writestr("repo/app.py", "eval(x)\n")
+    with pytest.raises(ValueError, match="compressed input size"):
+        analyse_repository_archive(valid, max_archive_bytes=1)
+
+
+def test_cli_accepts_zip_archive_mode(tmp_path, monkeypatch, capsys):
+    archive = tmp_path / "cli-repo.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("cli-repo/app.py", "eval(user_input)\n")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["unweb-repository-analysis", str(archive), "--archive"],
+    )
+    assert main() == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["repository"] == "cli-repo"
+    assert result["findings"][0]["id"] == "python-dynamic-evaluation"
