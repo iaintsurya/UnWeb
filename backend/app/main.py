@@ -11,11 +11,12 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import database
-from .models import ScanRequest, ScanResult
+from .models import ScanRequest, ScanResult, GitHubRepositoryScanRequest
 from .limits import SlidingWindowLimiter
 from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
 from .repository_analysis import analyse_repository_archive, MAX_ARCHIVE_BYTES
+from .github_source import fetch_github_repository_archive, GitHubSourceError
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -246,6 +247,111 @@ async def create_repository_scan(request: Request):
         repository_name = Path(safe_name).stem
         report.repository = repository_name[:100] or "repository"
         return report.to_dict()
+    finally:
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+        if acquired:
+            REPOSITORY_SCAN_SEMAPHORE.release()
+
+
+
+
+@app.post("/api/github-repository-scans")
+async def create_github_repository_scan(payload: GitHubRepositoryScanRequest):
+    """Analyse a public GitHub repository after an explicit owner-authorisation acknowledgement."""
+    if not payload.authorised:
+        raise HTTPException(
+            403,
+            detail={
+                "code": "repository_authorisation_required",
+                "message": "Confirm that you own or are explicitly authorised to assess this repository.",
+            },
+        )
+
+    retry_after = REPOSITORY_SCAN_LIMITER.check("github-source")
+    if retry_after:
+        raise HTTPException(
+            429,
+            detail={
+                "code": "github_repository_scan_rate_limited",
+                "message": "Too many GitHub repository scans. Try again shortly.",
+            },
+            headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
+        )
+
+    acquired = False
+    temporary_path: str | None = None
+    try:
+        try:
+            await asyncio.wait_for(
+                REPOSITORY_SCAN_SEMAPHORE.acquire(),
+                timeout=REPOSITORY_SCAN_QUEUE_TIMEOUT,
+            )
+            acquired = True
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(
+                429,
+                detail={
+                    "code": "repository_scan_capacity_reached",
+                    "message": "A repository analysis is already running. Try again shortly.",
+                },
+                headers={"Retry-After": "2"},
+            ) from exc
+
+        descriptor, temporary_path = tempfile.mkstemp(prefix="unweb-github-", suffix=".zip")
+        os.close(descriptor)
+        try:
+            source = await asyncio.wait_for(
+                fetch_github_repository_archive(
+                    payload.repository_url, payload.ref, temporary_path
+                ),
+                timeout=60,
+            )
+        except GitHubSourceError as exc:
+            raise HTTPException(
+                exc.status_code,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise HTTPException(
+                502,
+                detail={
+                    "code": "github_network_error",
+                    "message": "UnWeb could not complete the bounded GitHub source download.",
+                },
+            ) from exc
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(
+                504,
+                detail={
+                    "code": "github_download_timeout",
+                    "message": "GitHub source resolution and download exceeded 60 seconds.",
+                },
+            ) from exc
+
+        try:
+            report = await asyncio.to_thread(analyse_repository_archive, temporary_path)
+        except ValueError as exc:
+            raise HTTPException(
+                400,
+                detail={"code": "invalid_github_repository_archive", "message": str(exc)},
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                502,
+                detail={
+                    "code": "github_archive_read_failed",
+                    "message": "The downloaded GitHub source archive could not be read.",
+                },
+            ) from exc
+
+        report.repository = str(source["full_name"])
+        result = report.to_dict()
+        result["source"] = source
+        return result
     finally:
         if temporary_path:
             try:
