@@ -30,5 +30,5 @@ Production also needs an authenticated API, per-user rate limits, durable backgr
 ## Roadmap
 
 - **v0.2 foundation:** recursive bounded crawler, observed graph edges, SQLite scan history, cross-page asset/script collection, bounded scan concurrency, frontend API helper, tests and CI.
-- **v1.0 hardening:** connection-time DNS pinning/egress enforcement, auth and rate limiting, durable workers, stronger JavaScript analysis, evidence provenance and deeper tests.
+- **v1.0 hardening:** network-level egress enforcement and independent SSRF review, authentication and shared per-user rate limiting, durable workers, stronger JavaScript analysis, evidence provenance and deeper tests.
 - **v2.0 advanced:** isolated Playwright network capture, DOM/style inspector, improved reconstruction, progress events, multi-user storage, and CLI/CI scan mode.
