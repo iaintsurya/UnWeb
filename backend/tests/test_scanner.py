@@ -127,11 +127,17 @@ def test_safe_fetch_rejects_off_origin_redirect_before_following(monkeypatch):
         async def __aexit__(self, exc_type, exc, traceback):
             return False
 
-        def stream(self, method, url):
+        def stream(self, method, url, headers=None, extensions=None):
             requested_urls.append(url)
+            assert headers["Host"] == "example.com"
+            assert extensions["sni_hostname"] == "example.com"
             return RedirectResponse()
 
-    monkeypatch.setattr(scanner, "validate_resolved_addresses", lambda url: [])
+    monkeypatch.setattr(
+        scanner,
+        "validate_resolved_addresses",
+        lambda url: ["93.184.216.34"],
+    )
     monkeypatch.setattr(scanner.httpx, "AsyncClient", FakeClient)
 
     with pytest.raises(scanner.URLRejected, match="original site origin"):
@@ -142,7 +148,7 @@ def test_safe_fetch_rejects_off_origin_redirect_before_following(monkeypatch):
             )
         )
 
-    assert requested_urls == ["https://example.com/start"]
+    assert requested_urls == ["https://93.184.216.34/start"]
 
 
 
@@ -182,3 +188,29 @@ def test_assets_and_scripts_are_collected_across_discovered_pages(monkeypatch):
         "https://example.com/root.js",
         "https://example.com/about.js",
     }
+
+
+
+def test_pinned_request_connects_to_ip_but_preserves_host_and_tls_identity():
+    pinned_url, host_header, extensions = scanner._pinned_request(
+        "https://www.example.com:8443/path?q=1",
+        "93.184.216.34",
+    )
+    assert pinned_url == "https://93.184.216.34:8443/path?q=1"
+    assert host_header == "www.example.com:8443"
+    assert extensions == {"sni_hostname": "www.example.com"}
+
+
+def test_pinned_request_handles_ipv6_literal():
+    pinned_url, host_header, extensions = scanner._pinned_request(
+        "https://[2606:4700:4700::1111]/",
+        "2606:4700:4700::1111",
+    )
+    assert pinned_url == "https://[2606:4700:4700::1111]/"
+    assert host_header == "[2606:4700:4700::1111]"
+    assert extensions == {}
+
+
+def test_pinned_request_rejects_invalid_resolved_address():
+    with pytest.raises(scanner.URLRejected, match="invalid address"):
+        scanner._pinned_request("https://example.com/", "not-an-ip")
