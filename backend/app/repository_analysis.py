@@ -282,6 +282,23 @@ def _dotted_name(node: ast.AST) -> str:
     return ""
 
 
+def _has_dynamic_query_construction(node: ast.AST) -> bool:
+    """Return true for interpolated/concatenated SQL expressions, not bind parameters."""
+    for child in ast.walk(node):
+        if isinstance(child, ast.JoinedStr) and any(
+            isinstance(part, ast.FormattedValue) for part in child.values
+        ):
+            return True
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute):
+            if child.func.attr == "format" and (child.args or child.keywords):
+                return True
+        if isinstance(child, ast.BinOp) and isinstance(child.op, (ast.Add, ast.Mod)):
+            operands = (child.left, child.right)
+            if any(not isinstance(operand, ast.Constant) for operand in operands):
+                return True
+    return False
+
+
 def _analyse_python_ast(
     source: str, relative_path: str
 ) -> list[RepositoryFinding]:
@@ -300,6 +317,21 @@ def _analyse_python_ast(
         line_number = getattr(node, "lineno", 1)
         source_line = lines[line_number - 1] if 0 < line_number <= len(lines) else ""
         evidence = _redact_evidence(source_line)
+
+        if function.rsplit(".", 1)[-1] in {"execute", "executemany", "executescript"} and node.args:
+            query_argument = node.args[0]
+            if _has_dynamic_query_construction(query_argument):
+                findings.append(_finding(
+                    "python-dynamic-sql-query",
+                    "injection",
+                    "Possible dynamically constructed SQL query",
+                    "medium",
+                    "medium",
+                    relative_path,
+                    line_number,
+                    evidence,
+                    "Use parameterised database queries for values and keep SQL structure static. Do not interpolate or concatenate untrusted input into SQL text.",
+                ))
 
         if function in {"eval", "exec"}:
             findings.append(_finding(
