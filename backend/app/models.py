@@ -59,3 +59,8 @@ class GitHubRepositoryScanRequest(BaseModel):
     repository_url: str = Field(min_length=15, max_length=2048)
     ref: str | None = Field(default=None, max_length=255)
     authorised: bool = False
+
+
+class DependencyAdvisoryRequest(BaseModel):
+    authorised: bool = False
+    packages: list[dict[str, str]] = Field(min_length=1, max_length=100)
