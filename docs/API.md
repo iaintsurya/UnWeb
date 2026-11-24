@@ -41,3 +41,15 @@ This is advisory matching, not a complete dependency audit or proof of safety. A
 ## Website scan path scopes
 
 Website scan requests accept `scope_paths`, a list of 1–20 absolute URL path prefixes. The default is `["/"]`, which retains the existing whole-origin crawl behavior. To narrow a scan, provide values such as `["/app", "/api/v1"]`. Matching is segment-aware (`/app` includes `/app` and `/app/users`, but not `/application`). Query strings, fragments, hostnames, control characters, backslashes, encoded separators, and dot segments are rejected in scope entries. The starting URL, discovered page links, redirects, and same-origin JavaScript fetches are constrained to the approved prefixes. The response records the normalized scope paths. This remains a path boundary within the submitted origin; it does not add authentication, ownership verification, or network egress enforcement.
+
+
+## Trusted authentication gateway and scan ownership
+
+The API supports identity injection from a trusted reverse proxy. Configure both backend environment variables:
+
+- `UNWEB_ENV=production` — enables production fail-closed behavior.
+- `UNWEB_AUTH_PROXY_SECRET` — a high-entropy random secret shared only between the reverse proxy and the API.
+
+For every request under `/api/` except `/api/health`, the proxy must authenticate the user, **remove any client-supplied** `X-UnWeb-Auth-Token` and `X-UnWeb-Auth-User` headers, then inject `X-UnWeb-Auth-Token` with the shared secret and `X-UnWeb-Auth-User` with the authenticated stable user identifier. The API compares the secret in constant time, validates the user identifier, and returns 401 when the identity is absent or invalid. The backend must not be reachable directly from untrusted networks; restrict it to the proxy at the network layer and use TLS between proxy and API where they cross hosts.
+
+Scan history and scan-detail endpoints are filtered by the authenticated user identifier. Existing SQLite records are migrated with owner `local`; they are not automatically reassigned to newly authenticated users. In non-production development mode, requests without a configured gateway retain the single local owner. Production startup fails if the gateway secret is missing. This is a **trusted-proxy integration**, not a built-in account/password or OAuth system; user login, account lifecycle, MFA, team sharing and role-based access remain responsibilities of the identity gateway and future product work.
