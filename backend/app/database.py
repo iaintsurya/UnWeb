@@ -89,13 +89,14 @@ def save_scan(result: ScanResult, owner_id: str = "local") -> None:
         connection.execute(
             """
             DELETE FROM scans
-            WHERE id NOT IN (
+            WHERE owner_id = ? AND id NOT IN (
                 SELECT id FROM scans
+                WHERE owner_id = ?
                 ORDER BY scanned_at DESC, id DESC
                 LIMIT ?
             )
             """,
-            (MAX_STORED_SCANS,),
+            (owner_id, owner_id, MAX_STORED_SCANS),
         )
 
 
