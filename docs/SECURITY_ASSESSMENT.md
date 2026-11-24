@@ -70,3 +70,8 @@ Prefer fewer checks with strong evidence, clear false-positive handling and usef
 ## Implemented dependency advisory lookup
 
 The API can query the public OSV batch endpoint for exact lockfile-resolved versions in npm, PyPI, Go and crates.io. It accepts package coordinates only (not URLs), deduplicates identical package/version tuples, caps each request at 100 packages and the provider response at 2 MB, limits advisory records per package, and returns a small allowlisted set of metadata. The endpoint requires an explicit operator acknowledgement and applies an in-process rate limit. No dependency is downloaded, installed, or executed. An empty OSV result is not proof that a dependency is secure; feed coverage and publication timing vary. The acknowledgement is not authentication and this endpoint is not suitable for an unauthenticated public deployment.
+
+
+## Initial redirect scope enforcement
+
+The first website request is constrained to the origin in the submitted URL. Redirects on the initial response, later page requests, and JavaScript fetches must remain on that same scheme/host/port origin. A redirect to another public host is rejected rather than silently transferring the scan to a destination the operator did not submit. This is an origin boundary, not a substitute for a future explicit hostname/path/port scope model or external network egress controls.
