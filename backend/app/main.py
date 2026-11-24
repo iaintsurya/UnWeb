@@ -158,7 +158,7 @@ def _normalize_authorization_hostname(raw: str) -> str:
     except ValueError as exc:
         if str(exc) == "DNS verification requires a domain name, not an IP address.":
             raise
-    if len(host) > 253 or not re.fullmatch(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", host):
+    if len(host) > 253 or not re.fullmatch(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", host):
         raise ValueError("Enter a valid fully-qualified domain name.")
     normalize_url(f"https://{host}")
     return host
