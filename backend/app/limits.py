@@ -47,10 +47,11 @@ class RedisSlidingWindowLimiter:
 
     _SCRIPT = """
     local key = KEYS[1]
-    local now = tonumber(ARGV[1])
-    local window = tonumber(ARGV[2])
-    local maximum = tonumber(ARGV[3])
-    local member = ARGV[4]
+    local clock = redis.call('TIME')
+    local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+    local window = tonumber(ARGV[1])
+    local maximum = tonumber(ARGV[2])
+    local member = ARGV[3]
     redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
     local count = redis.call('ZCARD', key)
     if count >= maximum then
@@ -83,7 +84,6 @@ class RedisSlidingWindowLimiter:
             self._SCRIPT,
             1,
             redis_key,
-            int(time.time() * 1000),
             self.window_ms,
             self.max_requests,
             uuid.uuid4().hex,
