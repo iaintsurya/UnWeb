@@ -251,6 +251,7 @@ def test_github_repository_scan_requires_explicit_authorisation():
 
 
 def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "github-repository-api.sqlite3")
     async def fake_fetch(repository_url, ref, destination):
         Path(destination).write_bytes(make_repository_zip())
         return {
@@ -280,6 +281,9 @@ def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkey
     assert report["repository"] == "owner/repo"
     assert report["source"]["commit_sha"] == "0123456789abcdef0123456789abcdef01234567"
     assert report["source"]["requested_ref"] == "main"
+    assert report["report_id"]
+    assert report["scanned_at"]
+    assert database.get_repository_report(report["report_id"], "local")["source"]["commit_sha"] == report["source"]["commit_sha"]
     assert any(item["source"] == "repository" for item in report["security_findings"])
     assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
     assert "repository-secret-value-123" not in response.text
