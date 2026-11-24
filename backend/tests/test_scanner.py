@@ -24,6 +24,21 @@ def test_html_content_type_validation():
     assert not scanner._is_html({"content-type": "image/png"})
 
 
+def test_initial_fetch_is_constrained_to_requested_origin(monkeypatch):
+    observed = {}
+
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+        observed["url"] = url
+        observed["allowed_origin"] = allowed_origin
+        return url, 200, {"content-type": "text/html"}, html_page("Home")
+
+    monkeypatch.setattr(scanner, "safe_fetch", fake_safe_fetch)
+    asyncio.run(scanner.scan_site("https://example.com/start", max_pages=1, include_reconstruction=False))
+
+    assert observed["url"] == "https://example.com/start"
+    assert observed["allowed_origin"] == ("https", "example.com", 443)
+
+
 def test_recursive_crawl_records_only_observed_edges(monkeypatch):
     responses = {
         "https://example.com/": html_page("Home", "/a", "/b"),
