@@ -466,8 +466,19 @@ async def create_repository_scan(request: Request):
         safe_name = Path(supplied_name.replace("\\", "/")).name
         repository_name = Path(safe_name).stem
         report.repository = repository_name[:100] or "repository"
-        await asyncio.to_thread(database.record_audit_event, request.state.user_id, "repository_zip_scan.completed", report.repository)
-        return report.to_dict()
+        result = report.to_dict()
+        report_id = secrets.token_urlsafe(18)
+        scanned_at = datetime.now(timezone.utc).isoformat()
+        result.update({"report_id": report_id, "scanned_at": scanned_at})
+        await asyncio.to_thread(
+            database.save_repository_report, report_id, result, request.state.user_id, scanned_at
+        )
+        await asyncio.to_thread(
+            database.record_audit_event, request.state.user_id,
+            "repository_zip_scan.completed", report_id,
+            {"repository": result["repository"]},
+        )
+        return result
     finally:
         if temporary_path:
             try:
@@ -572,7 +583,17 @@ async def create_github_repository_scan(payload: GitHubRepositoryScanRequest, re
         report.repository = str(source["full_name"])
         result = report.to_dict()
         result["source"] = source
-        await asyncio.to_thread(database.record_audit_event, request.state.user_id, "github_repository_scan.completed", str(source["full_name"]))
+        report_id = secrets.token_urlsafe(18)
+        scanned_at = datetime.now(timezone.utc).isoformat()
+        result.update({"report_id": report_id, "scanned_at": scanned_at})
+        await asyncio.to_thread(
+            database.save_repository_report, report_id, result, request.state.user_id, scanned_at
+        )
+        await asyncio.to_thread(
+            database.record_audit_event, request.state.user_id,
+            "github_repository_scan.completed", report_id,
+            {"repository": result["repository"], "commit_sha": source["commit_sha"]},
+        )
         return result
     finally:
         if temporary_path:
@@ -582,6 +603,32 @@ async def create_github_repository_scan(payload: GitHubRepositoryScanRequest, re
                 pass
         if acquired:
             REPOSITORY_SCAN_SEMAPHORE.release()
+
+
+@app.get("/api/repository-reports")
+async def repository_report_history(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """List recent repository assessments for the authenticated owner."""
+    items = await asyncio.to_thread(
+        database.list_repository_reports, request.state.user_id, limit
+    )
+    return {"items": items}
+
+
+@app.get("/api/repository-reports/{report_id}")
+async def repository_report_detail(report_id: str, request: Request):
+    """Load a complete repository assessment without crossing owner boundaries."""
+    report = await asyncio.to_thread(
+        database.get_repository_report, report_id, request.state.user_id
+    )
+    if report is None:
+        raise HTTPException(
+            404,
+            detail={"code": "repository_report_not_found", "message": "Repository report not found."},
+        )
+    return report
 
 
 @app.post("/api/dependency-advisories")
