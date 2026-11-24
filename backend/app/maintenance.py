@@ -64,8 +64,32 @@ def backup_database(source: Path, destination: Path, *, overwrite: bool = False)
     return _copy_database(source, destination, overwrite=overwrite)
 
 
+def checkpoint_database(path: Path) -> None:
+    """Checkpoint and remove SQLite sidecars after all application writers are stopped."""
+    path = Path(path).expanduser().resolve()
+    wal_path = Path(f"{path}-wal")
+    shm_path = Path(f"{path}-shm")
+    if not path.is_file():
+        if wal_path.exists() or shm_path.exists():
+            raise sqlite3.DatabaseError("SQLite sidecars exist without their database file.")
+        return
+    with closing(sqlite3.connect(str(path), timeout=10)) as connection:
+        result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if result and result[0] != 0:
+            raise sqlite3.DatabaseError("SQLite WAL checkpoint is busy; ensure all writers are stopped.")
+    if wal_path.exists() and wal_path.stat().st_size > 0:
+        raise sqlite3.DatabaseError("SQLite WAL still contains data after checkpoint; restore was not attempted.")
+    wal_path.unlink(missing_ok=True)
+    shm_path.unlink(missing_ok=True)
+
+
 def restore_database(backup: Path, destination: Path, *, overwrite: bool = False) -> Path:
     """Restore a verified backup atomically; callers must stop DB-writing services."""
+    destination = Path(destination).expanduser().resolve()
+    if destination.exists() and overwrite:
+        checkpoint_database(destination)
+    elif Path(f"{destination}-wal").exists() or Path(f"{destination}-shm").exists():
+        raise sqlite3.DatabaseError("SQLite sidecars exist; checkpoint the database before restore.")
     return _copy_database(backup, destination, overwrite=overwrite)
 
 
