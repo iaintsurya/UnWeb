@@ -118,3 +118,17 @@ def test_retention_limit_does_not_delete_another_owners_scans(tmp_path, monkeypa
     assert database.get_scan("bob-scan", "bob") is not None
     assert database.get_scan("alice-old", "alice") is None
     assert database.get_scan("alice-new", "alice") is not None
+
+
+def test_audit_events_are_owner_scoped_and_return_structured_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "audit.sqlite3")
+    database.initialize_database()
+    database.record_audit_event("alice", "website_scan.completed", "scan-1", {"pages": 3})
+    database.record_audit_event("bob", "website_scan.completed", "scan-2")
+
+    alice_events = database.list_audit_events("alice")
+    assert len(alice_events) == 1
+    assert alice_events[0]["action"] == "website_scan.completed"
+    assert alice_events[0]["resource_id"] == "scan-1"
+    assert alice_events[0]["metadata"] == {"pages": 3}
+    assert database.list_audit_events("bob")[0]["resource_id"] == "scan-2"
