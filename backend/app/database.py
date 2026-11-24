@@ -377,3 +377,9 @@ def revoke_authorized_target(target_id: str, owner_id: str, revoked_at: str) -> 
             (revoked_at, target_id, owner_id),
         )
     return cursor.rowcount == 1
+
+
+def check_database() -> None:
+    """Raise sqlite errors if the configured database cannot serve a query."""
+    with _connection() as connection:
+        connection.execute("SELECT 1").fetchone()
