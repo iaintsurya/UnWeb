@@ -17,6 +17,7 @@ from .models import ScanResult
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "unweb.sqlite3"
 DB_PATH = Path(os.environ.get("UNWEB_DB_PATH", str(DEFAULT_DB_PATH)))
 MAX_STORED_SCANS = 250
+MAX_STORED_REPOSITORY_REPORTS = 100
 MAX_AUDIT_EVENTS_PER_OWNER = 1000
 
 
@@ -60,6 +61,21 @@ def initialize_database() -> None:
             connection.execute("ALTER TABLE scans ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_scans_owner_scanned_at ON scans(owner_id, scanned_at DESC)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS repository_reports (
+                report_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                repository TEXT NOT NULL,
+                scanned_at TEXT NOT NULL,
+                source_commit TEXT,
+                payload TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_repository_reports_owner_time ON repository_reports(owner_id, scanned_at DESC)"
         )
         connection.execute(
             """
@@ -174,6 +190,75 @@ def list_scans(limit: int = 20, owner_id: str = "local") -> list[dict[str, objec
             (owner_id, safe_limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+
+def save_repository_report(
+    report_id: str,
+    report: dict[str, object],
+    owner_id: str,
+    scanned_at: str,
+) -> None:
+    """Persist a bounded repository assessment under the authenticated owner."""
+    repository = str(report.get("repository", "repository"))[:255]
+    source = report.get("source")
+    source_commit = source.get("commit_sha") if isinstance(source, dict) else None
+    with _connection() as connection:
+        connection.execute(
+            """INSERT INTO repository_reports
+            (report_id, owner_id, repository, scanned_at, source_commit, payload)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(report_id) DO UPDATE SET
+                owner_id=excluded.owner_id, repository=excluded.repository,
+                scanned_at=excluded.scanned_at, source_commit=excluded.source_commit,
+                payload=excluded.payload""",
+            (
+                report_id, owner_id, repository, scanned_at, source_commit,
+                json.dumps(report, sort_keys=True, separators=(",", ":")),
+            ),
+        )
+        connection.execute(
+            """DELETE FROM repository_reports
+            WHERE owner_id = ? AND report_id NOT IN (
+                SELECT report_id FROM repository_reports
+                WHERE owner_id = ? ORDER BY scanned_at DESC, report_id DESC LIMIT ?
+            )""",
+            (owner_id, owner_id, MAX_STORED_REPOSITORY_REPORTS),
+        )
+
+
+def get_repository_report(report_id: str, owner_id: str) -> dict[str, object] | None:
+    with _connection() as connection:
+        row = connection.execute(
+            "SELECT payload FROM repository_reports WHERE report_id = ? AND owner_id = ?",
+            (report_id, owner_id),
+        ).fetchone()
+    return json.loads(row["payload"]) if row else None
+
+
+def list_repository_reports(owner_id: str, limit: int = 20) -> list[dict[str, object]]:
+    safe_limit = max(1, min(int(limit), 100))
+    with _connection() as connection:
+        rows = connection.execute(
+            """SELECT report_id, repository, scanned_at, source_commit, payload
+            FROM repository_reports WHERE owner_id = ?
+            ORDER BY scanned_at DESC, report_id DESC LIMIT ?""",
+            (owner_id, safe_limit),
+        ).fetchall()
+    items = []
+    for row in rows:
+        payload = json.loads(row["payload"])
+        items.append({
+            "report_id": row["report_id"],
+            "repository": row["repository"],
+            "scanned_at": row["scanned_at"],
+            "source_commit": row["source_commit"],
+            "files_scanned": payload.get("files_scanned", 0),
+            "finding_count": len(payload.get("findings", [])),
+            "dependency_count": payload.get("dependency_count", 0),
+            "truncated": payload.get("truncated", False),
+        })
+    return items
 
 
 def record_audit_event(
