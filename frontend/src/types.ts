@@ -14,3 +14,6 @@ export type RepositoryFinding={id:string;category:string;title:string;severity:s
 export type RepositoryRoute={method:string;path:string;source_path:string;line:number;syntax:string};
 export type DependencyRecord={name:string;ecosystem:string;source_path:string;source_type:string;version_constraint?:string|null;resolved_version?:string|null;dependency_group:string};
 export type RepositoryReport={repository:string;scanner_version:string;findings:RepositoryFinding[];security_findings?:CommonSecurityFinding[];route_inventory?:RepositoryRoute[];route_count?:number;route_inventory_truncated?:boolean;dependency_inventory:DependencyRecord[];dependency_count:number;dependency_inventory_truncated:boolean;files_scanned:number;bytes_scanned:number;skipped_files:number;truncated:boolean;limitations:string[];source?:{provider:string;full_name:string;requested_ref:string;default_branch?:string|null;commit_sha:string;archive_bytes:number}};
+
+
+export type AdvisoryReport={provider:string;packages_checked:number;packages_with_advisories:number;advisory_matches:number;results:{package:string;ecosystem:string;version:string;advisory_count:number;truncated:boolean;advisories:{id:string;summary:string;aliases:string[];modified:string|null;published:string|null;references:string[]}[]}[];limitations:string[]};
