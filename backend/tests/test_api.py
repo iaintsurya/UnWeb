@@ -481,7 +481,7 @@ def test_production_startup_requires_authentication_secret(monkeypatch):
 
 def test_production_startup_requires_shared_redis(monkeypatch):
     monkeypatch.setattr(main, "UNWEB_ENV", "production")
-    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "configured-secret")
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "x" * 64)
     monkeypatch.setattr(main, "REDIS_CLIENT", None)
     with pytest.raises(RuntimeError, match="UNWEB_REDIS_URL"):
         with TestClient(main.app):
