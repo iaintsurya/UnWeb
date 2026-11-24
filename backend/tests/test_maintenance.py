@@ -44,7 +44,7 @@ def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path, mon
     source = tmp_path / "source.sqlite3"
     backup = tmp_path / "backup.sqlite3"
     destination = tmp_path / "restored.sqlite3"
-    _seed_database(source)
+    _seed_database(source, monkeypatch)
     backup_database(source, backup)
 
     destination.write_bytes(b"existing")
