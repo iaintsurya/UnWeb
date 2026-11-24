@@ -202,7 +202,7 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
         ))
 
     server_value = h.get("server", "").strip()
-    if server_value and re.search(r"\\d+\\.\\d+(?:\\.\\d+)?", server_value):
+    if server_value and re.search(r"\d+\.\d+(?:\.\d+)?", server_value):
         findings.append(Finding(
             id="server-version-disclosure",
             title="Server response exposes a version-like identifier",
@@ -223,7 +223,7 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
             recommendation="Remove unnecessary X-Powered-By response headers where practical. This is informational hardening, not evidence that the disclosed technology is vulnerable.",
         ))
 
-    if re.search(r"(?:^|[\\s;])(?:script-src|default-src)[^;]*(?:'unsafe-inline'|'unsafe-eval'|\\*)", csp):
+    if re.search(r"(?:^|[\s;])(?:script-src|default-src)[^;]*(?:'unsafe-inline'|'unsafe-eval'|\*)", csp):
         findings.append(Finding(
             id="csp-permissive-script-source",
             title="Content Security Policy contains a permissive script source",
