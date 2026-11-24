@@ -94,6 +94,7 @@ Set `UNWEB_DB_PATH` in the backend process environment to use a different databa
 
 ## API
 
+- `GET /api/health` and `GET /api/health/ready`; `GET /api/health/browser-worker` reports the Redis-stream worker heartbeat.
 - `GET /api/health`
 - `POST /api/scans` with `{"url":"https://example.com","max_pages":8,"authorised":true}`; the explicit acknowledgement is not authentication or proof of ownership.
 - `POST /api/repository-scans` with a raw ZIP request body, `Content-Type: application/zip`, `X-UnWeb-Authorised: true`, and optional URL-encoded `X-Repository-Filename`; streams up to 50 MB into a temporary file, analyses it, returns JSON, and deletes the archive.
@@ -139,7 +140,7 @@ The `--confirm-isolated-egress` flag is an operator acknowledgement only. It doe
 
 Install locally for development with `cd backend && pip install -r requirements-browser.txt && python -m playwright install chromium`, but do not run the browser worker directly on a machine or network that lacks the external egress controls above. The feature is optional; the standard API and CI do not install browser binaries or depend on Playwright.
 
-This is a single unauthenticated render: it does not submit forms, bypass access controls, reuse your browser profile, or crawl links. It is runtime evidence collection, not active vulnerability validation. Browser output is not yet persisted or shown in the web UI; durable isolated job orchestration is required before API integration.
+This is a single unauthenticated render: it does not submit forms, bypass access controls, reuse your browser profile, or crawl links. It is runtime evidence collection, not active vulnerability validation. Browser renders are submitted through `POST /api/browser-jobs`, persisted as owner-scoped jobs in SQLite, dispatched through Redis Streams, and executed by the separate non-root worker container. Results are available from `GET /api/browser-jobs/{job_id}` and in the Browser Jobs dashboard. `GET /api/health/browser-worker` reports the consumer heartbeat. Production still requires a separately enforced host/cloud default-deny egress policy; the in-container proxy is defence in depth, not the external boundary.
 
 ## Local repository analysis preview
 
