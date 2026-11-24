@@ -345,3 +345,51 @@ def test_encoded_path_separators_are_not_scope_ambiguous():
     )
     with pytest.raises(scanner.URLRejected, match="Encoded path separators"):
         scanner.normalize_scope_paths(["/app%2fadmin"])
+
+
+
+def test_safe_fetch_rejects_redirect_outside_path_scope_before_second_request(monkeypatch):
+    requested_urls = []
+
+    class RedirectResponse:
+        status_code = 302
+        headers = {"location": "/admin"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        def stream(self, method, url, headers=None, extensions=None):
+            requested_urls.append(url)
+            return RedirectResponse()
+
+    monkeypatch.setattr(scanner, "validate_resolved_addresses", lambda url: ["93.184.216.34"])
+    monkeypatch.setattr(scanner.httpx, "AsyncClient", FakeClient)
+
+    with pytest.raises(scanner.URLRejected, match="approved path scope"):
+        asyncio.run(
+            scanner.safe_fetch(
+                "https://example.com/app/start",
+                allowed_origin=scanner._origin("https://example.com"),
+                allowed_paths=["/app"],
+            )
+        )
+
+    assert requested_urls == ["https://93.184.216.34/app/start"]
+
+
+def test_malformed_percent_escape_is_rejected_in_scope_prefix():
+    with pytest.raises(scanner.URLRejected, match="Encoded path separators"):
+        scanner.normalize_scope_paths(["/app/%zz"])
