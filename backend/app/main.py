@@ -37,8 +37,8 @@ REDIS_CLIENT = Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeou
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    if UNWEB_ENV == "production" and not AUTH_PROXY_SECRET:
-        raise RuntimeError("UNWEB_AUTH_PROXY_SECRET is required when UNWEB_ENV=production.")
+    if UNWEB_ENV == "production" and len(AUTH_PROXY_SECRET) < 32:
+        raise RuntimeError("UNWEB_AUTH_PROXY_SECRET must contain at least 32 characters in production.")
     if UNWEB_ENV == "production" and not REDIS_CLIENT:
         raise RuntimeError("UNWEB_REDIS_URL is required in production for shared rate limits.")
     if REDIS_CLIENT:
