@@ -115,3 +115,45 @@ def test_effective_hsts_and_nosniff_do_not_trigger_weak_value_findings():
     assert "invalid-x-content-type-options" not in ids
     assert "ineffective-strict-transport-security" not in ids
     assert "empty-content-security-policy" not in ids
+
+
+
+def test_passive_cors_and_technology_header_observations_are_cautious():
+    findings = analyze_security(
+        {
+            "access-control-allow-origin": "*",
+            "server": "example-httpd/2.4.58",
+            "x-powered-by": "ExampleRuntime",
+        },
+        "https://example.com/",
+    )
+    by_id = {finding.id: finding for finding in findings}
+    assert by_id["cors-wildcard-origin"].severity == "low"
+    assert "does not by itself demonstrate" in by_id["cors-wildcard-origin"].evidence
+    assert by_id["server-version-disclosure"].severity == "info"
+    assert "2.4.58" not in by_id["server-version-disclosure"].evidence
+    assert by_id["technology-header-disclosure"].severity == "info"
+    assert "ExampleRuntime" not in by_id["technology-header-disclosure"].evidence
+
+
+def test_permissive_csp_script_sources_are_reported_without_claiming_exploitability():
+    findings = analyze_security(
+        {"content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'"},
+        "https://example.com/",
+    )
+    by_id = {finding.id: finding for finding in findings}
+    assert by_id["csp-permissive-script-source"].severity == "low"
+    assert "depends on the complete policy" in by_id["csp-permissive-script-source"].evidence
+
+
+def test_public_cors_without_credentials_is_not_mislabeled_as_credentialed_access():
+    findings = analyze_security(
+        {
+            "access-control-allow-origin": "*",
+            "access-control-allow-credentials": "true",
+        },
+        "https://example.com/",
+    )
+    cors = next(item for item in findings if item.id == "cors-wildcard-origin")
+    assert "does not by itself demonstrate access to private or credentialed data" in cors.evidence
+    assert not any(item.id == "cors-credential-theft" for item in findings)
