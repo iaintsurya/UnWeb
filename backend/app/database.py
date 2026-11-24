@@ -41,6 +41,7 @@ def initialize_database() -> None:
             """
             CREATE TABLE IF NOT EXISTS scans (
                 id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL DEFAULT 'local',
                 requested_url TEXT NOT NULL,
                 final_url TEXT NOT NULL,
                 title TEXT,
@@ -50,19 +51,23 @@ def initialize_database() -> None:
             )
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(scans)")}
+        if "owner_id" not in columns:
+            connection.execute("ALTER TABLE scans ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
         connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_scans_scanned_at ON scans(scanned_at DESC)"
+            "CREATE INDEX IF NOT EXISTS idx_scans_owner_scanned_at ON scans(owner_id, scanned_at DESC)"
         )
 
 
-def save_scan(result: ScanResult) -> None:
+def save_scan(result: ScanResult, owner_id: str = "local") -> None:
     with _connection() as connection:
         connection.execute(
             """
             INSERT INTO scans (
-                id, requested_url, final_url, title, status_code, scanned_at, payload
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, owner_id, requested_url, final_url, title, status_code, scanned_at, payload
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                owner_id=excluded.owner_id,
                 requested_url=excluded.requested_url,
                 final_url=excluded.final_url,
                 title=excluded.title,
@@ -72,6 +77,7 @@ def save_scan(result: ScanResult) -> None:
             """,
             (
                 result.id,
+                owner_id,
                 result.requested_url,
                 result.final_url,
                 result.title,
@@ -93,26 +99,27 @@ def save_scan(result: ScanResult) -> None:
         )
 
 
-def get_scan(scan_id: str) -> ScanResult | None:
+def get_scan(scan_id: str, owner_id: str = "local") -> ScanResult | None:
     with _connection() as connection:
         row = connection.execute(
-            "SELECT payload FROM scans WHERE id = ?", (scan_id,)
+            "SELECT payload FROM scans WHERE id = ? AND owner_id = ?", (scan_id, owner_id)
         ).fetchone()
     if row is None:
         return None
     return ScanResult.model_validate_json(row["payload"])
 
 
-def list_scans(limit: int = 20) -> list[dict[str, object]]:
+def list_scans(limit: int = 20, owner_id: str = "local") -> list[dict[str, object]]:
     safe_limit = max(1, min(int(limit), 100))
     with _connection() as connection:
         rows = connection.execute(
             """
             SELECT id, requested_url, final_url, title, status_code, scanned_at
             FROM scans
+            WHERE owner_id = ?
             ORDER BY scanned_at DESC, id DESC
             LIMIT ?
             """,
-            (safe_limit,),
+            (owner_id, safe_limit),
         ).fetchall()
     return [dict(row) for row in rows]
