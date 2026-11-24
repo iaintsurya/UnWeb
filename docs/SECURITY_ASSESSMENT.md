@@ -75,3 +75,8 @@ The API can query the public OSV batch endpoint for exact lockfile-resolved vers
 ## Initial redirect scope enforcement
 
 The first website request is constrained to the origin in the submitted URL. Redirects on the initial response, later page requests, and JavaScript fetches must remain on that same scheme/host/port origin. A redirect to another public host is rejected rather than silently transferring the scan to a destination the operator did not submit. This is an origin boundary, not a substitute for a future explicit hostname/path/port scope model or external network egress controls.
+
+
+## Additional passive header-value checks
+
+The website response analyser now distinguishes missing security headers from selected ineffective values. It reports an `X-Content-Type-Options` value other than `nosniff`, an HTTPS HSTS header with a missing, ambiguous, invalid, or zero `max-age`, and an empty `Content-Security-Policy` header. These are bounded configuration observations only; they do not establish exploitability or assess the full quality of a CSP. A valid header value can still be insufficient for a particular application.
