@@ -52,7 +52,8 @@ def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path, mon
         restore_database(backup, destination)
 
     # A stale shared-memory sidecar must not be carried into the restored DB.
-    destination.write_bytes(source.read_bytes())
+    with sqlite3.connect(destination) as old_database:
+        old_database.execute("CREATE TABLE previous_state (value TEXT)")
     stale_shm = Path(f"{destination}-shm")
     stale_shm.write_bytes(b"stale sidecar")
     restore_database(backup, destination, overwrite=True)
