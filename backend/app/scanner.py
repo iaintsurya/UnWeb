@@ -5,7 +5,7 @@ import ipaddress
 
 from collections import deque
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlsplit, urlunsplit, urldefrag
+from urllib.parse import urljoin, urlsplit, urlunsplit, urldefrag, unquote
 
 from .models import ScanResult
 from .finding_schema import website_security_findings
@@ -36,6 +36,50 @@ def _same_origin(url: str, origin: tuple[str, str, int]) -> bool:
         return _origin(url) == origin
     except ValueError:
         return False
+
+def _canonical_scope_path(raw: str) -> str:
+    """Validate a path-only scope prefix and return a safe decoded path."""
+    if not isinstance(raw, str) or not raw.startswith("/") or len(raw) > 512:
+        raise URLRejected("Scope paths must be absolute URL paths beginning with '/'.")
+    if any(ord(char) < 32 for char in raw) or "\\" in raw:
+        raise URLRejected("Scope path contains invalid characters.")
+    parts = urlsplit(raw)
+    if parts.scheme or parts.netloc or parts.query or parts.fragment or parts.path != raw:
+        raise URLRejected("Scope entries must contain only a URL path, without query or fragment.")
+    decoded = raw
+    for _ in range(2):
+        decoded = unquote(decoded)
+        if "\\" in decoded or any(ord(char) < 32 for char in decoded):
+            raise URLRejected("Scope path contains an encoded separator or control character.")
+        if any(segment in {".", ".."} for segment in decoded.split("/")):
+            raise URLRejected("Scope paths must not contain dot segments.")
+    if "%" in decoded and decoded != raw:
+        raise URLRejected("Scope path contains ambiguous nested URL encoding.")
+    normalized = "/" + "/".join(segment for segment in decoded.split("/") if segment)
+    if raw.endswith("/") and normalized != "/":
+        normalized += "/"
+    return normalized
+
+
+def normalize_scope_paths(paths: list[str] | None) -> list[str]:
+    if paths is None:
+        return ["/"]
+    if not paths or len(paths) > 20:
+        raise URLRejected("Provide between 1 and 20 approved path prefixes.")
+    normalized = list(dict.fromkeys(_canonical_scope_path(path) for path in paths))
+    return normalized or ["/"]
+
+
+def _path_in_scope(url: str, scope_paths: list[str]) -> bool:
+    try:
+        path = _canonical_scope_path(urlsplit(url).path or "/")
+    except (URLRejected, ValueError):
+        return False
+    for prefix in scope_paths:
+        base = prefix.rstrip("/") or "/"
+        if base == "/" or path == base or path.startswith(base + "/"):
+            return True
+    return False
 
 
 def _pinned_request(url: str, address: str) -> tuple[str, str, dict[str, str]]:
@@ -124,8 +168,11 @@ async def safe_fetch(
     url: str,
     max_bytes: int = MAX_HTML,
     allowed_origin: tuple[str, str, int] | None = None,
+    allowed_paths: list[str] | None = None,
 ):
     current = normalize_url(url)
+    if allowed_paths is not None and not _path_in_scope(current, allowed_paths):
+        raise URLRejected("Requested URL is outside the approved path scope.")
     for hop in range(MAX_REDIRECTS + 1):
         # Resolve and validate once, then connect to each validated IP literal
         # in turn. HTTPX never performs another DNS lookup for these requests.
@@ -160,6 +207,8 @@ async def safe_fetch(
                             redirect_url = normalize_url(urljoin(current, location))
                             if allowed_origin is not None and not _same_origin(redirect_url, allowed_origin):
                                 raise URLRejected("Redirect left the original site origin.")
+                            if allowed_paths is not None and not _path_in_scope(redirect_url, allowed_paths):
+                                raise URLRejected("Redirect left the approved path scope.")
                             current = redirect_url
                             redirected = True
                             break
@@ -185,12 +234,15 @@ async def safe_fetch(
     raise URLRejected("Too many redirects.")
 
 
-async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bool = True):
+async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bool = True, scope_paths: list[str] | None = None):
     start = normalize_url(raw_url)
+    scope_paths = normalize_scope_paths(scope_paths)
+    if not _path_in_scope(start, scope_paths):
+        raise URLRejected("Starting URL is outside the approved path scope.")
     # The operator authorised the requested origin, not an arbitrary redirect target.
     # Enforce that boundary on the very first response as well as later crawl requests.
     requested_origin = _origin(start)
-    final_url, status, headers, body = await safe_fetch(start, allowed_origin=requested_origin)
+    final_url, status, headers, body = await safe_fetch(start, allowed_origin=requested_origin, allowed_paths=scope_paths)
     if not _is_html(headers):
         raise UnsupportedContentType("The target returned a non-HTML response. UnWeb analyses HTML pages.")
 
@@ -211,7 +263,7 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         source_url = urldefrag(source_page.url)[0]
         for link in source_page.links:
             target_url = urldefrag(link)[0]
-            if not _same_origin(target_url, origin):
+            if not _same_origin(target_url, origin) or not _path_in_scope(target_url, scope_paths):
                 continue
 
             edge = (source_url, target_url)
@@ -236,14 +288,14 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
 
         try:
             fetched_url, page_status, page_headers, page_body = await safe_fetch(
-                requested_url, allowed_origin=origin
+                requested_url, allowed_origin=origin, allowed_paths=scope_paths
             )
         except (URLRejected, httpx.HTTPError, OSError):
             continue
 
         # The starting page defines the crawl boundary. Do not follow a
         # same-origin link to a different host through a redirect.
-        if not _same_origin(fetched_url, origin) or not _is_html(page_headers):
+        if not _same_origin(fetched_url, origin) or not _path_in_scope(fetched_url, scope_paths) or not _is_html(page_headers):
             continue
 
         final_page_url = urldefrag(fetched_url)[0]
@@ -288,15 +340,15 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         script_url
         for scanned_page in pages
         for script_url in scanned_page.scripts
-        if _same_origin(script_url, origin)
+        if _same_origin(script_url, origin) and _path_in_scope(script_url, scope_paths)
     ))[:20]
     js = []
     for script_url in script_urls:
         try:
             fetched_script_url, _, script_headers, script = await safe_fetch(
-                script_url, MAX_SCRIPT, allowed_origin=origin
+                script_url, MAX_SCRIPT, allowed_origin=origin, allowed_paths=scope_paths
             )
-            if not _same_origin(fetched_script_url, origin):
+            if not _same_origin(fetched_script_url, origin) or not _path_in_scope(fetched_script_url, scope_paths):
                 raise URLRejected("Script redirected outside the target origin.")
             content_type = next(
                 (value for key, value in script_headers.items() if key.lower() == "content-type"),
@@ -336,6 +388,7 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         id=str(uuid.uuid4()),
         requested_url=start,
         final_url=final_url,
+        scope_paths=scope_paths,
         status_code=status,
         scanned_at=scanned_at,
         title=page.title,
