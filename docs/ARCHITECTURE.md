@@ -32,30 +32,32 @@ The current API:
 - connects to validated IP literals while preserving HTTP Host and TLS identity;
 - follows bounded same-origin HTML links and records only observed page edges;
 - extracts metadata, assets, technologies and bounded JavaScript route/framework/source-map clues;
-- records passive response-header observations;
-- saves scan results in single-instance SQLite;
-- applies in-process concurrency, timeout and rate limits.
+- records passive response-header and cookie-attribute observations with cookie-value redaction;
+- persists owner-scoped website scans, repository reports, browser jobs/results, target authorizations and audit events in single-instance SQLite;
+- requires trusted reverse-proxy identity in production and uses Redis-backed shared per-user rate limits;
+- supports DNS TXT target-control challenges, revocation and port/path scope checks;
+- dispatches browser jobs through Redis Streams to a separate worker container, with worker-side origin/path checks and heartbeat monitoring;
+- applies bounded concurrency, timeout, request and rate limits.
 
 The current scanner is primarily a discovery and passive evidence collector. It does not yet run a comprehensive vulnerability test suite, validate exploit chains, test logged-in authorization boundaries, or establish that a target is vulnerable. A missing security header is a configuration observation whose risk depends on application context, not automatically a critical vulnerability.
 
 ## Optional browser worker
 
-The Playwright engine is a separate CLI path, not an API dependency:
+The Playwright engine is an API-managed asynchronous worker, isolated from the ingress-facing API:
 
 ```text
-Operator launches one disposable, non-root worker
-  -> HTTPS target URL normalisation and public DNS validation
-  -> loopback-only CONNECT proxy starts
-  -> Chromium launches with its sandbox enabled and proxy configured
-  -> fresh non-persistent context (downloads off, service workers blocked)
-  -> context route guard permits only the target HTTPS origin
-  -> CONNECT proxy revalidates DNS and opens a socket to a validated IP literal
-  -> one DOM-ready render (request/time budgets)
-  -> bounded DOM/style and network metadata report (query strings omitted)
-  -> browser, context, proxy and process exit
+Authenticated owner submits a scoped browser job
+  -> API validates HTTPS URL, DNS-verified target grant, path subset and request budget
+  -> owner-scoped job record is persisted in SQLite
+  -> Redis Streams carries the job ID to the single worker consumer
+  -> worker reloads the job and rechecks target authorization
+  -> Chromium launches in a fresh non-persistent context with its sandbox enabled
+  -> request and WebSocket guards enforce exact origin and approved path prefixes
+  -> bounded DOM, asset, network and runtime evidence is persisted to SQLite
+  -> owner retrieves the result through authenticated API routes
 ```
 
-This is runtime observation. It does not submit test inputs or prove vulnerability. Any later browser-assisted active test must use the explicit scope engine, request budgets, non-destructive payload policy, and worker isolation described above.
+The worker uses a loopback-only CONNECT proxy and revalidates public DNS before opening a socket to a validated IP literal. This is runtime observation. It does not submit test inputs or prove vulnerability. Any later browser-assisted active test must use the explicit scope engine, request budgets, non-destructive payload policy, and worker isolation described above.
 
 The proxy denies non-CONNECT traffic and any host/port other than the initial target origin. Every allowed CONNECT resolves the hostname again, rejects the entire answer set if any address is non-public, and connects to a validated IP literal rather than allowing the browser to perform the destination DNS lookup. Redirects therefore have to pass through the same proxy before the browser can open the next TLS tunnel. Browser route interception is an additional application-level control, not the security boundary.
 
@@ -116,16 +118,14 @@ Coverage must be explicit. A scanner result should say which checks ran, which w
 
 ## Persistence
 
-The preview uses the Python standard library's SQLite driver. Scan payloads, owner-scoped browser job state/results, target authorizations and audit events are stored in SQLite; Redis Streams provides durable browser-job dispatch and Redis also provides shared rate limits. The production Compose baseline mounts a persistent SQLite volume into one API and one browser worker. This is a single-instance deployment, not a horizontally scalable database architecture. The path is configurable through `UNWEB_DB_PATH`.
-
-Before multi-user or enterprise use, storage must evolve to support authenticated ownership, job state, immutable audit records, evidence retention/redaction policies, and safe multi-instance concurrency.
+The preview uses the Python standard library's SQLite driver. Owner-scoped scan payloads, repository reports, browser job state/results, target authorizations and local audit events are stored in SQLite; Redis Streams dispatches browser job IDs and Redis also provides shared rate limits. Production Compose mounts one persistent SQLite volume into one API and one browser worker. This is intentionally single-instance and is not a horizontally scalable database architecture. The path is configurable through `UNWEB_DB_PATH`. Local audit events are not tamper-proof or a replacement for an independently controlled append-only audit service.
 
 ## Roadmap
 
-- **Foundation (current):** bounded crawler, observed page graph, SQLite scan history, JavaScript clues, passive security-header/cookie observations with cookie-value redaction, local read-only repository-analysis CLI (Python AST plus cross-language lexical checks), optional isolated browser-worker prototype, tests and CI.
-- **Security assessment MVP:** scope/consent model, target inventory, authenticated GitHub repository selection and bounded ingestion, common structured findings/evidence, documented passive checks, explicitly enabled low-impact checks, reports and retesting.
-- **Correlation and validation engine:** correlate live website/API routes and browser evidence with repository handlers and authorization logic; add stronger language-aware/data-flow and dependency analysis; use owner-provided test identities, safe input-validation checks, risk ranking, and remediation workflows.
-- **Production hardening:** authentication, shared rate limits, durable worker queue, external network policy enforcement, audit retention, role separation and independent security review.
+- **Foundation (implemented preview):** bounded same-origin crawler, passive response observations, common evidence schema, read-only repository analysis, OSV exact-version advisory lookup, route inventory/correlation, SARIF export, owner-scoped persistence, DNS TXT target grants, trusted-proxy identity integration, Redis shared rate limits, API-managed Redis Streams browser jobs, hardened container images, tests and CI.
+- **Security assessment MVP (incomplete):** broader documented passive checks, explicit low-impact active checks, stronger finding validation and false-positive handling, complete retest workflow, and richer evidence/report lifecycle.
+- **Correlation and validation engine (incomplete):** deeper language-aware/data-flow analysis, stronger dependency coverage, owner-provided test identities, safe input-validation checks, risk ranking and remediation workflows.
+- **Production hardening (incomplete):** operator-supplied OIDC/SAML gateway, host/cloud default-deny egress enforcement, externally controlled append-only audit, off-host backup and recovery drills, deployment monitoring, independent SSRF/security review, and replacement of single-instance SQLite if multi-instance scale is required.
 ## Common finding and evidence contract
 
 `backend/app/finding_schema.py` adapts website and repository findings into a common `security_findings` contract without removing the legacy source-specific `findings` arrays. IDs are deterministic for the same source, check, target, and location, so a finding can be correlated across repeat scans while evidence and severity evolve. The record keeps severity separate from confidence and carries a controlled validation state. Website checks report observed response facts; local source patterns remain suspected until separately validated. Location is represented as a URL for website findings or a repository path and optional line number for code findings. Impact and preconditions remain unset when the scanner has not established them.
