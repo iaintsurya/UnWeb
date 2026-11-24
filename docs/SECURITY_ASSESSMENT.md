@@ -80,3 +80,7 @@ The first website request is constrained to the origin in the submitted URL. Red
 ## Additional passive header-value checks
 
 The website response analyser now distinguishes missing security headers from selected ineffective values. It reports an `X-Content-Type-Options` value other than `nosniff`, an HTTPS HSTS header with a missing, ambiguous, invalid, or zero `max-age`, and an empty `Content-Security-Policy` header. These are bounded configuration observations only; they do not establish exploitability or assess the full quality of a CSP. A valid header value can still be insufficient for a particular application.
+
+## Website path-scope enforcement
+
+Website scan requests accept 1–20 approved absolute URL path prefixes. The default `/` retains the previous whole-origin behavior; narrower prefixes use segment-aware matching. The scanner rejects unsafe or ambiguous scope entries, including hostnames, query strings, fragments, control characters, backslashes, encoded separators, and dot segments. The approved paths are enforced before the initial network request and across discovered page links, redirects, and same-origin JavaScript fetches. The normalized prefixes are included in scan results. Path scope supplements the existing scheme/host/port origin boundary; it is not authentication, ownership verification, or external network egress enforcement.
