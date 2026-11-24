@@ -6,6 +6,7 @@ class ScanRequest(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
     max_pages: int = Field(default=8, ge=1, le=30)
     authorised: bool = False
+    scope_paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=20)
 
 
 class Finding(BaseModel):
