@@ -15,7 +15,8 @@ from starlette.responses import JSONResponse
 
 from . import database
 from .models import ScanRequest, ScanResult, GitHubRepositoryScanRequest
-from .limits import SlidingWindowLimiter
+from .limits import SlidingWindowLimiter, RedisSlidingWindowLimiter
+from redis import Redis
 from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
 from .repository_analysis import analyse_repository_archive, MAX_ARCHIVE_BYTES
@@ -25,12 +26,19 @@ from .dependency_advisories import query_advisories, AdvisoryLookupError
 
 AUTH_PROXY_SECRET = os.environ.get("UNWEB_AUTH_PROXY_SECRET", "")
 UNWEB_ENV = os.environ.get("UNWEB_ENV", "development").strip().lower()
+REDIS_URL = os.environ.get("UNWEB_REDIS_URL", "").strip()
+REDIS_CLIENT = Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2) if REDIS_URL else None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if UNWEB_ENV == "production" and not AUTH_PROXY_SECRET:
         raise RuntimeError("UNWEB_AUTH_PROXY_SECRET is required when UNWEB_ENV=production.")
+    if UNWEB_ENV == "production" and not REDIS_CLIENT:
+        raise RuntimeError("UNWEB_REDIS_URL is required in production for shared rate limits.")
+    if REDIS_CLIENT:
+        await asyncio.to_thread(REDIS_CLIENT.ping)
+        _configure_rate_limiters(REDIS_CLIENT)
     await asyncio.to_thread(database.initialize_database)
     yield
 
@@ -104,6 +112,13 @@ REPOSITORY_SCAN_QUEUE_TIMEOUT = 0.5
 ADVISORY_LOOKUP_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 
 
+def _configure_rate_limiters(client) -> None:
+    global SCAN_RATE_LIMITER, REPOSITORY_SCAN_LIMITER, ADVISORY_LOOKUP_LIMITER
+    SCAN_RATE_LIMITER = RedisSlidingWindowLimiter(client, 10, 60, "website-scan")
+    REPOSITORY_SCAN_LIMITER = RedisSlidingWindowLimiter(client, 5, 60, "repository-scan")
+    ADVISORY_LOOKUP_LIMITER = RedisSlidingWindowLimiter(client, 10, 60, "dependency-advisory")
+
+
 async def load_scan(scan_id: str, owner_id: str) -> ScanResult:
     result = await asyncio.to_thread(database.get_scan, scan_id, owner_id)
     if result is None:
@@ -128,7 +143,7 @@ async def create_scan(payload: ScanRequest, request: Request):
         )
 
     client_key = request.state.user_id
-    retry_after = SCAN_RATE_LIMITER.check(client_key)
+    retry_after = await asyncio.to_thread(SCAN_RATE_LIMITER.check, client_key)
     if retry_after:
         raise HTTPException(
             429,
@@ -237,7 +252,7 @@ async def create_repository_scan(request: Request):
             )
 
     client_key = request.client.host if request.client else "unknown"
-    retry_after = REPOSITORY_SCAN_LIMITER.check(client_key)
+    retry_after = await asyncio.to_thread(REPOSITORY_SCAN_LIMITER.check, request.state.user_id)
     if retry_after:
         raise HTTPException(
             429,
@@ -331,7 +346,7 @@ async def create_github_repository_scan(payload: GitHubRepositoryScanRequest, re
             },
         )
 
-    retry_after = REPOSITORY_SCAN_LIMITER.check(request.state.user_id)
+    retry_after = await asyncio.to_thread(REPOSITORY_SCAN_LIMITER.check, request.state.user_id)
     if retry_after:
         raise HTTPException(
             429,
@@ -436,7 +451,7 @@ async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Req
         )
 
     client_key = request.client.host if request.client else "unknown"
-    retry_after = ADVISORY_LOOKUP_LIMITER.check(client_key)
+    retry_after = await asyncio.to_thread(ADVISORY_LOOKUP_LIMITER.check, request.state.user_id)
     if retry_after:
         raise HTTPException(
             429,
