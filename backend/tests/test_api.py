@@ -561,3 +561,23 @@ def test_verified_target_scope_rejects_other_hosts_ports_and_broader_paths(monke
         with pytest.raises(HTTPException) as error:
             main._enforce_verified_target(payload, "alice")
         assert error.value.status_code == 403
+
+
+def test_scan_result_records_verified_target_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "scan-target-id.sqlite3")
+    monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(10, 60))
+
+    async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
+        return make_result()
+
+    monkeypatch.setattr(main, "scan_site", fake_scan_site)
+    with TestClient(main.app) as client:
+        created = client.post(
+            "/api/scans",
+            json={"url": "https://example.com/app", "authorised": True, "scope_paths": ["/app"], "target_id": "verified-target-123"},
+        )
+        loaded = client.get("/api/scans/api-test-scan")
+    assert created.status_code == 200
+    assert created.json()["target_id"] == "verified-target-123"
+    assert loaded.status_code == 200
+    assert loaded.json()["target_id"] == "verified-target-123"
