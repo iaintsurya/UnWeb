@@ -237,6 +237,16 @@ def save_target_challenge(
 ) -> None:
     with _connection() as connection:
         connection.execute(
+            "DELETE FROM target_challenges WHERE expires_at <= ? OR (used_at IS NOT NULL AND used_at < ?)",
+            (created_at, created_at),
+        )
+        pending = connection.execute(
+            "SELECT COUNT(*) AS count FROM target_challenges WHERE owner_id = ? AND used_at IS NULL AND expires_at > ?",
+            (owner_id, created_at),
+        ).fetchone()["count"]
+        if pending >= 20:
+            raise ValueError("Too many pending target verification challenges. Wait for existing challenges to expire.")
+        connection.execute(
             """INSERT INTO target_challenges (
                 challenge_id, owner_id, hostname, ports_json, scope_paths_json,
                 token_hash, created_at, expires_at
@@ -283,6 +293,12 @@ def verify_target_challenge(
         if row is None or row["used_at"] is not None or row["expires_at"] <= verified_at:
             return None
         if not secrets.compare_digest(row["token_hash"], token_hash):
+            return None
+        active_targets = connection.execute(
+            "SELECT COUNT(*) AS count FROM authorized_targets WHERE owner_id = ? AND revoked_at IS NULL AND expires_at > ?",
+            (owner_id, verified_at),
+        ).fetchone()["count"]
+        if active_targets >= 100:
             return None
         cursor = connection.execute(
             "UPDATE target_challenges SET used_at = ? WHERE challenge_id = ? AND owner_id = ? AND used_at IS NULL",
