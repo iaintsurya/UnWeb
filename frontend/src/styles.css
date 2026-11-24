@@ -55,3 +55,8 @@
 .url-consent input{margin:0;accent-color:#252a32}
 .urlbar .run:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:720px){.scan-controls{order:3;flex-basis:100%;max-width:none}.scan-controls .urlbar{order:unset;width:100%}.url-consent{white-space:normal}}
+
+.scope-control{display:flex;align-items:center;gap:7px;font:9px var(--mono);color:#858c95;white-space:nowrap}
+.scope-control input{width:150px;min-width:0;padding:5px 7px;border:1px solid var(--line);border-radius:4px;background:#fff;color:#252a32;font:10px var(--mono);outline:0}
+.scope-control input:focus{border-color:#b58b50;box-shadow:0 0 0 2px #a66b1e12}
+@media(max-width:720px){.scope-control{white-space:normal}.scope-control input{flex:1;width:auto}}
