@@ -35,8 +35,8 @@ class FakeRedis:
         self.retry_ms = retry_ms
         self.calls = []
 
-    def eval(self, script, key_count, key, now, window, maximum, member):
-        self.calls.append((script, key_count, key, now, window, maximum, member))
+    def eval(self, script, key_count, key, window, maximum, member):
+        self.calls.append((script, key_count, key, window, maximum, member))
         return self.retry_ms
 
 
@@ -48,7 +48,8 @@ def test_redis_limiter_uses_atomic_script_and_returns_retry_seconds():
 
     assert limiter.check("user-123") == 2.75
     assert len(client.calls) == 1
-    script, key_count, key, now, window, maximum, member = client.calls[0]
+    script, key_count, key, window, maximum, member = client.calls[0]
+    assert "TIME" in script
     assert "ZREMRANGEBYSCORE" in script
     assert "ZADD" in script
     assert key_count == 1
