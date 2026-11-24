@@ -52,3 +52,15 @@ jobs:
       - name: Run frontend tests
         working-directory: frontend
         run: npm test
+
+  browser-worker-image:
+    name: Browser worker container build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Build optional browser worker image
+        run: docker build --file Dockerfile.browser-worker --tag unweb-browser-worker:${{ github.sha }} .
+      - name: Verify non-root runtime and installed Chromium
+        run: |
+          docker run --rm --entrypoint python unweb-browser-worker:${{ github.sha }} -c "import os; from playwright.sync_api import sync_playwright; assert os.getuid() != 0; p = sync_playwright().start(); assert os.path.isfile(p.chromium.executable_path); p.stop()"
