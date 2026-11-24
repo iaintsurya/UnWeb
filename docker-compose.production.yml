@@ -1,6 +1,7 @@
 services:
   redis:
     image: redis:7.4-alpine
+    user: "999:999"
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis_data:/data
