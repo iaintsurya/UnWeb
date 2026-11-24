@@ -226,6 +226,37 @@ async def health():
     return {"status": "ok", "service": "unweb-api", "version": "0.2.0"}
 
 
+@app.get("/api/health/browser-worker")
+async def browser_worker_health():
+    """Report whether the isolated Redis-stream consumer has a live heartbeat."""
+    if REDIS_CLIENT is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_configured", "service": "unweb-browser-worker"},
+            headers={"Retry-After": "5"},
+        )
+    try:
+        heartbeat, ttl = await asyncio.gather(
+            asyncio.to_thread(REDIS_CLIENT.get, "unweb:browser-worker:heartbeat"),
+            asyncio.to_thread(REDIS_CLIENT.ttl, "unweb:browser-worker:heartbeat"),
+        )
+    except RedisError as exc:
+        raise HTTPException(
+            503,
+            detail={"code": "browser_worker_status_unavailable",
+                    "message": "The browser worker heartbeat could not be checked."},
+            headers={"Retry-After": "5"},
+        ) from exc
+    if not heartbeat or ttl <= 0:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "offline", "service": "unweb-browser-worker"},
+            headers={"Retry-After": "5"},
+        )
+    return {"status": "online", "service": "unweb-browser-worker",
+            "heartbeat_ttl_seconds": int(ttl)}
+
+
 @app.get("/api/health/ready")
 async def readiness():
     try:
