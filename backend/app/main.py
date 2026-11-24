@@ -267,8 +267,9 @@ async def create_scan(payload: ScanRequest, request: Request):
             scan_site(payload.url, payload.max_pages, True, payload.scope_paths),
             timeout=SCAN_TIMEOUT_SECONDS,
         )
+        result.target_id = payload.target_id
         await asyncio.to_thread(database.save_scan, result, request.state.user_id)
-        await asyncio.to_thread(database.record_audit_event, request.state.user_id, "website_scan.completed", result.id)
+        await asyncio.to_thread(database.record_audit_event, request.state.user_id, "website_scan.completed", result.id, {"target_id": payload.target_id})
         return result
     except asyncio.TimeoutError as exc:
         raise HTTPException(
