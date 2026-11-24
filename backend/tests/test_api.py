@@ -606,3 +606,54 @@ def test_production_scan_api_requires_verified_target_before_scanning(tmp_path, 
         )
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "verified_target_required"
+
+
+def test_readiness_returns_ready_when_database_and_redis_are_healthy(monkeypatch):
+    class FakeRedis:
+        def __init__(self):
+            self.pings = 0
+        def ping(self):
+            self.pings += 1
+            return True
+
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "x" * 64)
+    redis = FakeRedis()
+    monkeypatch.setattr(main, "REDIS_CLIENT", redis)
+    with TestClient(main.app) as client:
+        response = client.get("/api/health/ready")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert redis.pings == 2
+
+
+def test_readiness_returns_503_when_redis_fails_after_startup(monkeypatch):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    class FlakyRedis:
+        def __init__(self):
+            self.pings = 0
+        def ping(self):
+            self.pings += 1
+            if self.pings > 1:
+                raise RedisConnectionError("redis unavailable")
+            return True
+
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "x" * 64)
+    monkeypatch.setattr(main, "REDIS_CLIENT", FlakyRedis())
+    with TestClient(main.app) as client:
+        response = client.get("/api/health/ready")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "service_not_ready"
+
+
+def test_readiness_returns_503_when_database_is_unavailable(monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
+    monkeypatch.setattr(database, "check_database", lambda: (_ for _ in ()).throw(sqlite3.OperationalError("offline")))
+    with TestClient(main.app) as client:
+        response = client.get("/api/health/ready")
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "service_not_ready"
