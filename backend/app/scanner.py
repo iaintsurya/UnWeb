@@ -49,7 +49,7 @@ def _canonical_scope_path(raw: str) -> str:
         raise URLRejected("Scope entries must contain only a URL path, without query or fragment.")
     decoded = raw
     for _ in range(2):
-        if re.search(r"%(?:2f|5c)", decoded, re.IGNORECASE):
+        if re.search(r"%(?![0-9a-fA-F]{2})", decoded) or re.search(r"%(?:2f|5c)", decoded, re.IGNORECASE):
             raise URLRejected("Encoded path separators are not allowed in scope paths.")
         decoded = unquote(decoded)
         if "\\" in decoded or any(ord(char) < 32 for char in decoded):
