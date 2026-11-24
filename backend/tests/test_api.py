@@ -470,7 +470,7 @@ def test_scan_api_fails_closed_when_shared_rate_limit_store_is_unavailable(monke
 
 
 def test_production_startup_requires_authentication_secret(monkeypatch):
-    monkeypatch.setattr(main, "UNWEB_ENV", "development")
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "")
     monkeypatch.setattr(main, "REDIS_CLIENT", None)
     with pytest.raises(RuntimeError, match="UNWEB_AUTH_PROXY_SECRET"):
@@ -479,7 +479,7 @@ def test_production_startup_requires_authentication_secret(monkeypatch):
 
 
 def test_production_startup_requires_shared_redis(monkeypatch):
-    monkeypatch.setattr(main, "UNWEB_ENV", "development")
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "configured-secret")
     monkeypatch.setattr(main, "REDIS_CLIENT", None)
     with pytest.raises(RuntimeError, match="UNWEB_REDIS_URL"):
