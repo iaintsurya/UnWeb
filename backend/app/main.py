@@ -149,7 +149,7 @@ async def create_scan(payload: ScanRequest, request: Request):
             429,
             detail={
                 "code": "scan_rate_limited",
-                "message": "Too many scans from this network address. Try again shortly.",
+                "message": "Too many scans for this account. Try again shortly.",
             },
             headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
         )
@@ -258,7 +258,7 @@ async def create_repository_scan(request: Request):
             429,
             detail={
                 "code": "repository_scan_rate_limited",
-                "message": "Too many repository uploads from this network address. Try again shortly.",
+                "message": "Too many repository scans for this account. Try again shortly.",
             },
             headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
         )
@@ -455,7 +455,7 @@ async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Req
     if retry_after:
         raise HTTPException(
             429,
-            detail={"code": "dependency_advisory_rate_limited", "message": "Too many advisory lookups. Try again shortly."},
+            detail={"code": "dependency_advisory_rate_limited", "message": "Too many advisory lookups for this account. Try again shortly."},
             headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
         )
     try:
