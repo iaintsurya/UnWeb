@@ -7,6 +7,7 @@ class ScanRequest(BaseModel):
     max_pages: int = Field(default=8, ge=1, le=30)
     authorised: bool = False
     scope_paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=20)
+    target_id: str | None = Field(default=None, max_length=64)
 
 
 class Finding(BaseModel):
@@ -66,3 +67,9 @@ class GitHubRepositoryScanRequest(BaseModel):
 class DependencyAdvisoryRequest(BaseModel):
     authorised: bool = False
     packages: list[dict[str, str]] = Field(min_length=1, max_length=100)
+
+
+class TargetAuthorizationChallengeRequest(BaseModel):
+    hostname: str = Field(min_length=3, max_length=253)
+    ports: list[int] = Field(default_factory=lambda: [443, 80], min_length=1, max_length=10)
+    scope_paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=20)
