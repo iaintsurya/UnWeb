@@ -17,6 +17,7 @@ from . import database
 from .models import ScanRequest, ScanResult, GitHubRepositoryScanRequest
 from .limits import SlidingWindowLimiter, RedisSlidingWindowLimiter
 from redis import Redis
+from redis.exceptions import RedisError
 from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
 from .repository_analysis import analyse_repository_archive, MAX_ARCHIVE_BYTES
@@ -112,6 +113,17 @@ REPOSITORY_SCAN_QUEUE_TIMEOUT = 0.5
 ADVISORY_LOOKUP_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 
 
+async def _check_rate_limit(limiter, key: str) -> float:
+    try:
+        return await asyncio.to_thread(limiter.check, key)
+    except RedisError as exc:
+        raise HTTPException(
+            503,
+            detail={"code": "rate_limit_store_unavailable", "message": "The shared rate-limit service is temporarily unavailable."},
+            headers={"Retry-After": "5"},
+        ) from exc
+
+
 def _configure_rate_limiters(client) -> None:
     global SCAN_RATE_LIMITER, REPOSITORY_SCAN_LIMITER, ADVISORY_LOOKUP_LIMITER
     SCAN_RATE_LIMITER = RedisSlidingWindowLimiter(client, 10, 60, "website-scan")
@@ -143,7 +155,7 @@ async def create_scan(payload: ScanRequest, request: Request):
         )
 
     client_key = request.state.user_id
-    retry_after = await asyncio.to_thread(SCAN_RATE_LIMITER.check, client_key)
+    retry_after = await _check_rate_limit(SCAN_RATE_LIMITER, client_key)
     if retry_after:
         raise HTTPException(
             429,
@@ -252,7 +264,7 @@ async def create_repository_scan(request: Request):
             )
 
     client_key = request.client.host if request.client else "unknown"
-    retry_after = await asyncio.to_thread(REPOSITORY_SCAN_LIMITER.check, request.state.user_id)
+    retry_after = await _check_rate_limit(REPOSITORY_SCAN_LIMITER, request.state.user_id)
     if retry_after:
         raise HTTPException(
             429,
@@ -451,7 +463,7 @@ async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Req
         )
 
     client_key = request.client.host if request.client else "unknown"
-    retry_after = await asyncio.to_thread(ADVISORY_LOOKUP_LIMITER.check, request.state.user_id)
+    retry_after = await _check_rate_limit(ADVISORY_LOOKUP_LIMITER, request.state.user_id)
     if retry_after:
         raise HTTPException(
             429,
