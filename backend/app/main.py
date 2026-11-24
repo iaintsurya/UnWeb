@@ -139,7 +139,7 @@ def _configure_rate_limiters(client) -> None:
 
 
 
-TARGET_CHALLENGE_TTL = timedelta(minutes=15)
+TARGET_CHALLENGE_TTL = timedelta(hours=1)
 TARGET_AUTHORIZATION_TTL = timedelta(days=30)
 
 
