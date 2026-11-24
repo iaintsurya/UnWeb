@@ -192,9 +192,9 @@ UnWeb does not bypass authentication, CAPTCHAs, access controls, or rate limits.
 |---|---|
 | v0.1 Preview | Safe URL intake, bounded fetch, metadata, initial fingerprints and UI |
 | v0.2 Foundation | Recursive bounded crawl, observed sitemap edges, SQLite history, cross-page asset/script inventory, scan capacity limits, frontend API helper, tests and CI |
-| v0.3 Security preview | Passive cookie-attribute checks with value redaction; local read-only repository-analysis CLI with Python AST and lexical checks, supported dependency manifest/lockfile inventory, bounded OSV advisory lookup for exact resolved versions, suspected findings and regression tests |
+| v0.3 Security preview | Passive cookie-attribute checks with value redaction; local read-only repository-analysis CLI with Python AST and lexical checks, supported dependency manifest/lockfile inventory, bounded OSV advisory lookup for exact resolved versions, suspected findings, owner-scoped persistent repository report history, SARIF 2.1.0 export and regression tests |
 | v1.0 Hardening | Trusted identity-gateway integration, owner-scoped scan history/audit, Redis shared per-user rate limits, and production Compose baseline are implemented; verified target ownership, external egress enforcement, durable isolated workers, external append-only audit, and independent SSRF review remain required |
-| v2.0 Advanced | Cross-source website/API-to-repository correlation, deeper language-aware and dependency analysis, integrated isolated Playwright jobs, progress events, multi-user storage and CLI/CI assessment workflows |
+| v2.0 Advanced | Cross-source website/API-to-repository correlation, deeper language-aware and dependency analysis, deeper AST/data-flow analysis, private GitHub App integration, managed OIDC gateway, external egress enforcement, append-only audit export and CI assessment workflows |
 
 ## AI and human collaboration
 
