@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from "react";
 import type {FormEvent, ReactNode} from "react";
 import {Activity,ArrowUpRight,Braces,Check,ChevronDown,Code2,Download,FileCode2,FileUp,GitBranch,Globe2,Layers3,LockKeyhole,Network,Search,ShieldCheck,X,CircleAlert,Package} from "lucide-react";
-import type {CommonSecurityFinding,RepositoryReport,ScanHistoryItem,ScanResult} from "./types";
+import type {AdvisoryReport,CommonSecurityFinding,RepositoryReport,ScanHistoryItem,ScanResult} from "./types";
 import {API_BASE_URL,apiRequest} from "./lib/api";
 import {correlateWebsiteAndRepository} from "./lib/correlation";
 import SitemapGraph from "./SitemapGraph";
