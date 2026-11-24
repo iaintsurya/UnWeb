@@ -242,3 +242,8 @@ Production scans require a target authorization created in the dashboard's **Tar
 For instructions to upload exported SARIF into the assessed repository's GitHub code-scanning dashboard, see [GitHub code-scanning integration](docs/GITHUB_CODE_SCANNING.md). The repository includes a copyable [manual upload workflow example](examples/github-actions/upload-unweb-sarif.yml).
 
 Repository assessments can be exported as JSON or SARIF 2.1.0 from the Repository workspace. SARIF output includes stable rule IDs and finding fingerprints, source-file locations, severity-to-level mapping, confidence and validation-state properties, remediation guidance, and repository commit metadata when available. UnWeb source indicators remain heuristic and marked as suspected; importing SARIF into a code-scanning platform does not turn them into confirmed vulnerabilities.
+
+
+## Database maintenance
+
+The API image includes `python -m app.maintenance backup DESTINATION` and `python -m app.maintenance restore BACKUP --confirm-restore` commands. They use SQLite's online backup API, verify database integrity, create files atomically with restrictive permissions, and require explicit overwrite/restore flags. See [production backup and restore instructions](docs/DEPLOYMENT.md#5-backups-and-upgrades); stop the API and browser worker before restoring.
