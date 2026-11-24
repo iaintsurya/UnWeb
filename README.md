@@ -239,4 +239,6 @@ Production scans require a target authorization created in the dashboard's **Tar
 
 ## Code-scanning export
 
+For instructions to upload exported SARIF into the assessed repository's GitHub code-scanning dashboard, see [GitHub code-scanning integration](docs/GITHUB_CODE_SCANNING.md). The repository includes a copyable [manual upload workflow example](examples/github-actions/upload-unweb-sarif.yml).
+
 Repository assessments can be exported as JSON or SARIF 2.1.0 from the Repository workspace. SARIF output includes stable rule IDs and finding fingerprints, source-file locations, severity-to-level mapping, confidence and validation-state properties, remediation guidance, and repository commit metadata when available. UnWeb source indicators remain heuristic and marked as suspected; importing SARIF into a code-scanning platform does not turn them into confirmed vulnerabilities.
