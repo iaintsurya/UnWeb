@@ -27,7 +27,7 @@ def test_html_content_type_validation():
 def test_initial_fetch_is_constrained_to_requested_origin(monkeypatch):
     observed = {}
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
         observed["url"] = url
         observed["allowed_origin"] = allowed_origin
         return url, 200, {"content-type": "text/html"}, html_page("Home")
@@ -48,7 +48,7 @@ def test_recursive_crawl_records_only_observed_edges(monkeypatch):
     }
     calls = []
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
         calls.append(url)
         if url not in responses:
             raise AssertionError(f"Unexpected fetch: {url}")
@@ -81,7 +81,7 @@ def test_crawl_respects_page_limit(monkeypatch):
     }
     calls = []
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
         calls.append(url)
         return url, 200, {"content-type": "text/html"}, responses[url]
 
@@ -93,7 +93,7 @@ def test_crawl_respects_page_limit(monkeypatch):
 
 
 def test_non_html_target_is_rejected(monkeypatch):
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
         return url, 200, {"content-type": "application/json"}, b'{"ok":true}'
 
     monkeypatch.setattr(scanner, "safe_fetch", fake_safe_fetch)
@@ -106,7 +106,7 @@ def test_non_html_link_is_not_added_as_a_page(monkeypatch):
         "https://example.com/": html_page("Home", "/data.json"),
     }
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
         if url == "https://example.com/data.json":
             return url, 200, {"content-type": "application/json"}, b'{"ok":true}'
         return url, 200, {"content-type": "text/html"}, responses[url]
@@ -185,7 +185,7 @@ def test_assets_and_scripts_are_collected_across_discovered_pages(monkeypatch):
     }
     calls = []
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
         calls.append(url)
         headers, body = responses[url]
         return url, 200, headers, body
@@ -237,7 +237,7 @@ def test_pinned_request_rejects_invalid_resolved_address():
 def test_scan_result_redacts_set_cookie_values_from_persistable_headers(monkeypatch):
     import json
 
-    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None):
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
         return (
             url,
             200,
@@ -262,3 +262,63 @@ def test_scan_result_redacts_set_cookie_values_from_persistable_headers(monkeypa
     assert "top-secret-value" not in serialized
     assert "sessionid" in serialized
     assert any(item.id == "cookie-sessionid-missing-secure" for item in result.findings)
+
+
+def test_scope_prefixes_are_segment_aware_and_reject_traversal():
+    scopes = scanner.normalize_scope_paths(["/app", "/admin/"])
+    assert scanner._path_in_scope("https://example.com/app", scopes)
+    assert scanner._path_in_scope("https://example.com/app/users", scopes)
+    assert scanner._path_in_scope("https://example.com/admin/settings", scopes)
+    assert not scanner._path_in_scope("https://example.com/application", scopes)
+    assert not scanner._path_in_scope("https://example.com/public", scopes)
+    with pytest.raises(scanner.URLRejected):
+        scanner.normalize_scope_paths(["/app/../admin"])
+    with pytest.raises(scanner.URLRejected):
+        scanner.normalize_scope_paths(["/app/%252e%252e/admin"])
+    with pytest.raises(scanner.URLRejected):
+        scanner.normalize_scope_paths(["https://evil.example/path"])
+
+
+def test_scan_rejects_start_url_outside_explicit_scope(monkeypatch):
+    async def unexpected_fetch(*args, **kwargs):
+        raise AssertionError("Out-of-scope target must not be fetched")
+
+    monkeypatch.setattr(scanner, "safe_fetch", unexpected_fetch)
+    with pytest.raises(scanner.URLRejected, match="Starting URL is outside"):
+        asyncio.run(
+            scanner.scan_site(
+                "https://example.com/public",
+                include_reconstruction=False,
+                scope_paths=["/app"],
+            )
+        )
+
+
+def test_crawler_does_not_fetch_or_report_pages_outside_scope(monkeypatch):
+    responses = {
+        "https://example.com/app": html_page("App", "/app/users", "/admin", "/application"),
+        "https://example.com/app/users": html_page("Users"),
+    }
+    calls = []
+
+    async def fake_safe_fetch(url, max_bytes=scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
+        calls.append(url)
+        headers = {"content-type": "text/html"}
+        return url, 200, headers, responses[url]
+
+    monkeypatch.setattr(scanner, "safe_fetch", fake_safe_fetch)
+    result = asyncio.run(
+        scanner.scan_site(
+            "https://example.com/app",
+            max_pages=10,
+            include_reconstruction=False,
+            scope_paths=["/app"],
+        )
+    )
+
+    assert calls == ["https://example.com/app", "https://example.com/app/users"]
+    assert [page.url for page in result.pages] == [
+        "https://example.com/app",
+        "https://example.com/app/users",
+    ]
+    assert result.scope_paths == ["/app"]
