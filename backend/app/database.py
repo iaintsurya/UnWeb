@@ -296,12 +296,16 @@ def verify_target_challenge(
             return None
         if not secrets.compare_digest(row["token_hash"], token_hash):
             return None
+        connection.execute(
+            "DELETE FROM authorized_targets WHERE expires_at <= ? OR (revoked_at IS NOT NULL AND revoked_at < ?)",
+            (verified_at, verified_at),
+        )
         active_targets = connection.execute(
             "SELECT COUNT(*) AS count FROM authorized_targets WHERE owner_id = ? AND revoked_at IS NULL AND expires_at > ?",
             (owner_id, verified_at),
         ).fetchone()["count"]
         if active_targets >= 100:
-            return None
+            raise ValueError("Maximum of 100 active verified targets per user reached. Revoke an existing target first.")
         cursor = connection.execute(
             "UPDATE target_challenges SET used_at = ? WHERE challenge_id = ? AND owner_id = ? AND used_at IS NULL",
             (verified_at, challenge_id, owner_id),
