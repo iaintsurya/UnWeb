@@ -222,3 +222,10 @@ The read-only repository analyser now flags direct dynamically constructed SQL e
 ## Production authentication gateway
 
 The API can accept authenticated identities from a trusted reverse proxy. For production set `UNWEB_ENV=production` and `UNWEB_AUTH_PROXY_SECRET` to a high-entropy secret shared only with the proxy. The proxy must authenticate users, strip any incoming `X-UnWeb-Auth-Token` and `X-UnWeb-Auth-User` headers supplied by clients, and inject those headers itself: the token header contains the shared secret and the user header contains the authenticated stable user ID. The API rejects missing/invalid identities and scopes persisted scan history/details to that user. Production startup fails closed if the shared secret is absent. Keep the API private behind the proxy; do not expose its port directly. This is an integration point for an identity provider/reverse proxy, not a built-in login system. In local development with no gateway configured, all scans belong to the single `local` owner.
+
+
+## Production deployment
+
+A containerised single-instance deployment is provided in `docker-compose.production.yml`. It builds the API and frontend images, runs Redis on an internal-only network, persists SQLite/Redis data, and applies non-root/read-only/capability/resource restrictions. The API is not published to the host; the frontend is intended to sit behind an external trusted authentication gateway.
+
+See [Production deployment guide](docs/DEPLOYMENT.md). The deployment requires an external ingress identity gateway (OIDC/SAML or equivalent) that protects both frontend and API requests, strips client-supplied identity headers, and injects the trusted identity headers. It also requires externally created ingress/egress Docker networks and host/cloud firewall rules restricting outbound traffic. Compose does not itself enforce target-specific egress policy. The stack remains single-instance because SQLite is not a multi-instance database.
