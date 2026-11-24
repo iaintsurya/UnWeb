@@ -8,12 +8,6 @@ class ScanRequest(BaseModel):
     authorised: bool = False
     scope_paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=20)
 
-    @field_validator("ports")
-    @classmethod
-    def validate_ports(cls, ports: list[int]) -> list[int]:
-        if any(port < 1 or port > 65535 for port in ports):
-            raise ValueError("Ports must be between 1 and 65535.")
-        return list(dict.fromkeys(ports))
     target_id: str | None = Field(default=None, max_length=64)
 
 
@@ -80,3 +74,10 @@ class TargetAuthorizationChallengeRequest(BaseModel):
     hostname: str = Field(min_length=3, max_length=253)
     ports: list[int] = Field(default_factory=lambda: [443, 80], min_length=1, max_length=10)
     scope_paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=20)
+
+    @field_validator("ports")
+    @classmethod
+    def validate_ports(cls, ports: list[int]) -> list[int]:
+        if any(port < 1 or port > 65535 for port in ports):
+            raise ValueError("Ports must be between 1 and 65535.")
+        return list(dict.fromkeys(ports))
