@@ -3,8 +3,10 @@
 The schema is initialized idempotently at application startup. Keep database
 files out of version control; set UNWEB_DB_PATH to choose another location.
 """
+import json
 import os
 import sqlite3
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -14,6 +16,7 @@ from .models import ScanResult
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "unweb.sqlite3"
 DB_PATH = Path(os.environ.get("UNWEB_DB_PATH", str(DEFAULT_DB_PATH)))
 MAX_STORED_SCANS = 250
+MAX_AUDIT_EVENTS_PER_OWNER = 1000
 
 
 def _connect() -> sqlite3.Connection:
@@ -56,6 +59,21 @@ def initialize_database() -> None:
             connection.execute("ALTER TABLE scans ADD COLUMN owner_id TEXT NOT NULL DEFAULT 'local'")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_scans_owner_scanned_at ON scans(owner_id, scanned_at DESC)"
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audit_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                resource_id TEXT,
+                occurred_at TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_owner_time ON audit_events(owner_id, event_id DESC)"
         )
 
 
@@ -124,3 +142,52 @@ def list_scans(limit: int = 20, owner_id: str = "local") -> list[dict[str, objec
             (owner_id, safe_limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def record_audit_event(
+    owner_id: str,
+    action: str,
+    resource_id: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    """Persist a minimal owner-scoped event; callers must not include secrets or raw response data."""
+    with _connection() as connection:
+        connection.execute(
+            """INSERT INTO audit_events (owner_id, action, resource_id, occurred_at, metadata_json)
+            VALUES (?, ?, ?, ?, ?)""",
+            (
+                owner_id,
+                action,
+                resource_id,
+                datetime.now(timezone.utc).isoformat(),
+                json.dumps(metadata or {}, sort_keys=True, separators=(",", ":")),
+            ),
+        )
+        connection.execute(
+            """DELETE FROM audit_events
+            WHERE owner_id = ? AND event_id NOT IN (
+                SELECT event_id FROM audit_events WHERE owner_id = ?
+                ORDER BY event_id DESC LIMIT ?
+            )""",
+            (owner_id, owner_id, MAX_AUDIT_EVENTS_PER_OWNER),
+        )
+
+
+def list_audit_events(owner_id: str, limit: int = 50) -> list[dict[str, object]]:
+    safe_limit = max(1, min(int(limit), 100))
+    with _connection() as connection:
+        rows = connection.execute(
+            """SELECT event_id, action, resource_id, occurred_at, metadata_json
+            FROM audit_events WHERE owner_id = ? ORDER BY event_id DESC LIMIT ?""",
+            (owner_id, safe_limit),
+        ).fetchall()
+    return [
+        {
+            "event_id": row["event_id"],
+            "action": row["action"],
+            "resource_id": row["resource_id"],
+            "occurred_at": row["occurred_at"],
+            "metadata": json.loads(row["metadata_json"]),
+        }
+        for row in rows
+    ]
