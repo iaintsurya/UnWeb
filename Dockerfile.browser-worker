@@ -15,7 +15,8 @@ RUN apt-get update \
     && python -m playwright install --with-deps chromium
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin unweb \
-    && chown -R unweb:unweb /ms-playwright /opt/unweb
+    && mkdir -p /data \
+    && chown -R unweb:unweb /ms-playwright /opt/unweb /data
 
 COPY --chown=unweb:unweb backend/app ./app
 

@@ -579,7 +579,7 @@ async def run_browser_worker() -> None:
     redis_url = os.environ.get("UNWEB_REDIS_URL", "").strip()
     if not redis_url:
         raise RuntimeError("UNWEB_REDIS_URL is required for browser worker mode.")
-    client = Redis.from_url(redis_url, socket_connect_timeout=3, socket_timeout=5,
+    client = Redis.from_url(redis_url, socket_connect_timeout=3, socket_timeout=15,
                             decode_responses=True)
     await asyncio.to_thread(client.ping)
     await asyncio.to_thread(database.initialize_database)
@@ -593,6 +593,7 @@ async def run_browser_worker() -> None:
     await asyncio.to_thread(browser_jobs.recover_interrupted_jobs)
     consumer = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
     while True:
+        await asyncio.to_thread(client.set, 'unweb:browser-worker:heartbeat', consumer, ex=30)
         reclaimed = await asyncio.to_thread(
             client.xautoclaim, browser_jobs.STREAM_NAME, browser_jobs.CONSUMER_GROUP,
             consumer, 60_000, "0-0", 1
