@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 import os
 import re
+import sqlite3
 import secrets
 import tempfile
 from pathlib import Path
@@ -75,7 +76,7 @@ async def require_trusted_identity(request: Request, call_next):
     """Trust identity only from a reverse proxy holding the configured shared secret."""
     if request.method == "OPTIONS":
         return await call_next(request)
-    if not request.url.path.startswith("/api/") or request.url.path == "/api/health":
+    if not request.url.path.startswith("/api/") or request.url.path.startswith("/api/health"):
         return await call_next(request)
 
     if not AUTH_PROXY_SECRET:
@@ -220,6 +221,23 @@ async def load_scan(scan_id: str, owner_id: str) -> ScanResult:
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "unweb-api", "version": "0.2.0"}
+
+
+@app.get("/api/health/ready")
+async def readiness():
+    try:
+        await asyncio.to_thread(database.check_database)
+        if UNWEB_ENV == "production":
+            if not REDIS_CLIENT:
+                raise RedisError("Redis is not configured.")
+            await asyncio.to_thread(REDIS_CLIENT.ping)
+    except (sqlite3.Error, RedisError, OSError) as exc:
+        raise HTTPException(
+            503,
+            detail={"code": "service_not_ready", "message": "A required storage dependency is unavailable."},
+            headers={"Retry-After": "5"},
+        ) from exc
+    return {"status": "ready", "service": "unweb-api"}
 
 
 @app.post("/api/scans", response_model=ScanResult)
