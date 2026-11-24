@@ -6,6 +6,7 @@ created atomically and are readable only by the current container user.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import os
 import sqlite3
 import tempfile
@@ -36,8 +37,8 @@ def _copy_database(source: Path, destination: Path, *, overwrite: bool) -> Path:
     os.close(descriptor)
     temporary = Path(temporary_name)
     try:
-        with sqlite3.connect(str(source), timeout=10) as source_connection:
-            with sqlite3.connect(str(temporary), timeout=10) as destination_connection:
+        with closing(sqlite3.connect(str(source), timeout=10)) as source_connection:
+            with closing(sqlite3.connect(str(temporary), timeout=10)) as destination_connection:
                 source_connection.backup(destination_connection)
                 result = destination_connection.execute("PRAGMA integrity_check").fetchone()
                 if not result or result[0] != "ok":
