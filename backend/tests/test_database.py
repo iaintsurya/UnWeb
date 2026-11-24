@@ -108,8 +108,12 @@ def test_retention_limit_does_not_delete_another_owners_scans(tmp_path, monkeypa
     monkeypatch.setattr(database, "MAX_STORED_SCANS", 1)
     database.initialize_database()
     database.save_scan(sample_result("bob-scan"), owner_id="bob")
-    database.save_scan(sample_result("alice-old"), owner_id="alice")
-    database.save_scan(sample_result("alice-new"), owner_id="alice")
+    alice_old = sample_result("alice-old")
+    alice_old.scanned_at = "2026-11-20T10:00:00+00:00"
+    alice_new = sample_result("alice-new")
+    alice_new.scanned_at = "2026-11-24T10:00:00+00:00"
+    database.save_scan(alice_old, owner_id="alice")
+    database.save_scan(alice_new, owner_id="alice")
 
     assert database.get_scan("bob-scan", "bob") is not None
     assert database.get_scan("alice-old", "alice") is None
