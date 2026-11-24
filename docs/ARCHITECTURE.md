@@ -65,7 +65,7 @@ The proxy denies non-CONNECT traffic and any host/port other than the initial ta
 
 Cross-origin subresources are blocked, so pages that depend on third-party CSS, fonts, images, or scripts may render incompletely. The worker currently handles one unauthenticated HTTPS page per job. It does not click links, submit forms, use a saved browser profile, or perform active vulnerability validation. API-managed jobs are owner-scoped in SQLite, dispatched through a Redis Streams consumer group, revalidated against the owner's current DNS-verified target grant immediately before execution, and stored with bounded evidence. The API exposes job creation/status/cancellation endpoints and a worker-heartbeat health endpoint. The production Compose stack mounts the same persistent SQLite volume into the API and one browser worker; do not scale either service against this single-instance SQLite deployment. The worker remains dependent on externally enforced default-deny egress controls.
 
-## Local repository analysis prototype
+## Repository analysis implementation
 
 The repository analyser is a separate local CLI path:
 
@@ -82,9 +82,9 @@ Operator selects an authorised local checkout
   -> emit JSON with suspected status and explicit limitations
 ```
 
-The local CLI supports local directories and bounded user-provided ZIP archives. The FastAPI application also exposes a first public-GitHub source integration: an operator supplies a canonical `https://github.com/{owner}/{repo}` URL, an optional branch/tag, and an explicit authorisation acknowledgement. UnWeb resolves the selected ref to a 40-character commit SHA before requesting the ZIP archive from GitHub; it disables environment proxy inheritance, does not follow arbitrary redirects, accepts the archive redirect only on `codeload.github.com` for the selected repository path, streams at most 50 MB to a temporary file, analyses it without executing code or installing dependencies, and deletes the archive. Private repositories, GitHub OAuth/App installation, PATs, remote clone, and advisory lookup are not implemented. GitHub source access is the only networked part of this repository-analysis path; the local CLI remains offline. Python AST checks cover selected dangerous-call patterns; selected manifest/lockfile parsers inventory dependency declarations and resolved versions without querying advisories. There is no control-flow, data-flow, inter-file reachability, or package vulnerability analysis. Reports include the immutable commit identity so a later retest can compare exact source revisions.
+The local CLI supports local directories and bounded user-provided ZIP archives. The FastAPI application exposes ZIP upload and public-GitHub source ingestion: an operator supplies a canonical `https://github.com/{owner}/{repo}` URL, an optional branch/tag, and an explicit authorisation acknowledgement. UnWeb resolves the selected ref to a 40-character commit SHA before requesting the ZIP archive from GitHub; it disables environment proxy inheritance, does not follow arbitrary redirects, accepts the archive redirect only on `codeload.github.com` for the selected repository path, streams at most 50 MB to a temporary file, analyses it without executing code or installing dependencies, and deletes the archive. Reports are persisted under the authenticated owner in SQLite and retain immutable source commit identity. Private repositories, GitHub OAuth/App installation, PATs and remote clone are not implemented. A separate OSV API endpoint can look up advisories for exact resolved package coordinates, but GitHub ingestion does not automatically enrich every report with advisory results. Python AST checks cover selected dangerous-call patterns; selected manifest/lockfile parsers inventory dependency declarations and resolved versions. There is no control-flow, data-flow, inter-file reachability, or complete package vulnerability analysis.
 
-## Finding and evidence model (planned)
+## Finding and evidence model
 
 A finding should be a structured record, not just a label or a scary severity badge. The planned record includes:
 - stable check identifier and category;
