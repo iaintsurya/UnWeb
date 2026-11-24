@@ -166,3 +166,48 @@ def test_dns_verified_targets_are_owner_scoped_single_use_and_revocable(tmp_path
     assert len(database.list_authorized_targets("alice", created)) == 1
     assert database.revoke_authorized_target("challenge-1", "alice", created)
     assert database.get_authorized_target("challenge-1", "alice", created) is None
+
+
+def test_repository_reports_persist_with_owner_scoping_and_summary_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "repository-reports.sqlite3")
+    database.initialize_database()
+    report = {
+        "repository": "owner/project",
+        "source": {"commit_sha": "0123456789abcdef"},
+        "files_scanned": 12,
+        "findings": [{"id": "rule-1"}, {"id": "rule-2"}],
+        "dependency_count": 4,
+        "truncated": False,
+    }
+    database.save_repository_report("report-alice", report, "alice", "2026-11-24T10:00:00+00:00")
+    database.save_repository_report("report-bob", report, "bob", "2026-11-24T10:01:00+00:00")
+
+    loaded = database.get_repository_report("report-alice", "alice")
+    assert loaded == report
+    assert database.get_repository_report("report-alice", "bob") is None
+    history = database.list_repository_reports("alice")
+    assert history == [{
+        "report_id": "report-alice",
+        "repository": "owner/project",
+        "scanned_at": "2026-11-24T10:00:00+00:00",
+        "source_commit": "0123456789abcdef",
+        "files_scanned": 12,
+        "finding_count": 2,
+        "dependency_count": 4,
+        "truncated": False,
+    }]
+    assert database.list_repository_reports("bob")[0]["report_id"] == "report-bob"
+
+
+def test_repository_report_retention_is_owner_scoped(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "repository-retention.sqlite3")
+    monkeypatch.setattr(database, "MAX_STORED_REPOSITORY_REPORTS", 1)
+    database.initialize_database()
+    report = {"repository": "project", "findings": [], "dependency_count": 0}
+    database.save_repository_report("bob-report", report, "bob", "2026-11-24T10:00:00+00:00")
+    database.save_repository_report("alice-old", report, "alice", "2026-11-24T10:01:00+00:00")
+    database.save_repository_report("alice-new", report, "alice", "2026-11-24T10:02:00+00:00")
+
+    assert database.get_repository_report("bob-report", "bob") is not None
+    assert database.get_repository_report("alice-old", "alice") is None
+    assert database.get_repository_report("alice-new", "alice") is not None
