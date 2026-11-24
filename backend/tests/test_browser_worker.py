@@ -137,8 +137,19 @@ def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch)
         async def continue_(self):
             self.action = "continue"
 
+    class FakeWebSocketRoute:
+        def __init__(self, url):
+            self.url = url
+            self.action = None
+
+        async def close(self, **kwargs):
+            self.action = "close"
+
+        async def connect_to_server(self):
+            self.action = "connect"
+
     class FakePage:
-        url = "https://example.com/"
+        url = "https://example.com/app"
 
         def __init__(self, context):
             self.context = context
@@ -148,12 +159,16 @@ def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch)
             self.handlers[event] = callback
 
         async def goto(self, url, **kwargs):
-            assert url == "https://example.com/"
+            assert url == "https://example.com/app"
             assert kwargs["wait_until"] == "domcontentloaded"
-            events["same_origin"] = FakeRoute("https://example.com/app.js")
+            events["same_origin"] = FakeRoute("https://example.com/app/app.js")
             events["other_origin"] = FakeRoute("https://assets.other.test/app.js")
             await self.context.route_handler(events["same_origin"])
             await self.context.route_handler(events["other_origin"])
+            events["allowed_websocket"] = FakeWebSocketRoute("wss://example.com/app/socket")
+            events["blocked_websocket"] = FakeWebSocketRoute("wss://example.com/admin/socket")
+            await self.context.websocket_handler(events["allowed_websocket"])
+            await self.context.websocket_handler(events["blocked_websocket"])
             response = SimpleNamespace(status=200, url=url)
             for callback in self.context.handlers.get("response", []):
                 callback(
@@ -176,10 +191,15 @@ def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch)
         def __init__(self):
             self.handlers = {}
             self.route_handler = None
+            self.websocket_handler = None
 
         async def route(self, pattern, handler):
             assert pattern == "**/*"
             self.route_handler = handler
+
+        async def route_web_socket(self, pattern, handler):
+            assert pattern == "**/*"
+            self.websocket_handler = handler
 
         def on(self, event, callback):
             self.handlers.setdefault(event, []).append(callback)
@@ -222,7 +242,9 @@ def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch)
         lambda url: ["93.184.216.34"],
     )
 
-    report = asyncio.run(browser_worker.run_browser_intelligence("https://example.com/"))
+    report = asyncio.run(browser_worker.run_browser_intelligence(
+        "https://example.com/app", scope_paths=["/app"]
+    ))
 
     assert launch_options["chromium_sandbox"] is True
     assert launch_options["proxy"]["server"].startswith("http://127.0.0.1:")
@@ -230,6 +252,8 @@ def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch)
     assert context_options["accept_downloads"] is False
     assert events["same_origin"].action == "continue"
     assert events["other_origin"].action == "abort"
+    assert events["allowed_websocket"].action == "connect"
+    assert events["blocked_websocket"].action == "close"
     assert events["context_closed"] is True
     assert events["browser_closed"] is True
     assert report["title"] == "Example"

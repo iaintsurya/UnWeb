@@ -126,10 +126,15 @@ def _origin_tuple(url: str) -> tuple[str, str, int]:
     parts = urlsplit(url)
     if not parts.hostname:
         raise URLRejected("URL has no hostname.")
+    scheme = parts.scheme.lower()
+    if scheme == "wss":
+        scheme = "https"
+    elif scheme == "ws":
+        scheme = "http"
     return (
-        parts.scheme.lower(),
+        scheme,
         _canonical_host(parts.hostname),
-        parts.port or (443 if parts.scheme.lower() == "https" else 80),
+        parts.port or (443 if scheme == "https" else 80),
     )
 
 
@@ -386,6 +391,23 @@ async def run_browser_intelligence(
                 await route.continue_()
 
             await browser_context.route("**/*", guard_request)
+
+            async def guard_websocket(websocket_route) -> None:
+                try:
+                    allowed = (
+                        _origin_tuple(websocket_route.url) == target_origin
+                        and _path_in_scope(websocket_route.url, scope_paths)
+                    )
+                except (URLRejected, ValueError):
+                    allowed = False
+                if not allowed:
+                    await websocket_route.close(
+                        code=1008, reason="Outside authorized target scope"
+                    )
+                    return
+                await websocket_route.connect_to_server()
+
+            await browser_context.route_web_socket("**/*", guard_websocket)
 
             def on_response(response) -> None:
                 nonlocal declared_response_bytes
