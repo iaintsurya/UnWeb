@@ -98,7 +98,7 @@ docker compose --env-file .env -f docker-compose.production.yml run --rm --no-de
 docker compose --env-file .env -f docker-compose.production.yml up -d api browser-worker frontend
 ```
 
-Restore refuses to run without `--confirm-restore` and refuses to replace an existing database unless `--overwrite` is provided. Test restores in a separate environment before relying on them. Back up the `redis_data` volume separately if preserving queued browser-job dispatch state is required; SQLite report/job records remain in `unweb_data`.
+Restore refuses to run without `--confirm-restore` and refuses to replace an existing database unless `--overwrite` is provided. When replacing an existing database, it checkpoints the old WAL and removes its SQLite sidecars only after confirming the checkpoint is not busy, then atomically installs the verified restore. If the checkpoint cannot complete, the restore is aborted without replacing the database. Test restores in a separate environment before relying on them. Back up the `redis_data` volume separately if preserving queued browser-job dispatch state is required; SQLite report/job records remain in `unweb_data`.
 
 Update code only after CI passes, rebuild with Compose, and retain a known-good image and off-host volume backup for rollback. Do not run multiple API replicas against the same SQLite volume.
 
