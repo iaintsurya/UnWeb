@@ -217,3 +217,8 @@ The website scan API now requires the request field `authorised: true`; otherwis
 ## Additional Python injection heuristic
 
 The read-only repository analyser now flags direct dynamically constructed SQL expressions passed to Python `execute`, `executemany`, and `executescript` calls. It checks f-string interpolation, string concatenation, `%` formatting and `.format()` calls, while leaving a literal SQL statement with separate bind parameters unflagged. Findings remain medium-confidence `suspected` indicators: the rule does not trace tainted values, understand ORM/query-builder semantics, or prove SQL injection.
+
+
+## Production authentication gateway
+
+The API can accept authenticated identities from a trusted reverse proxy. For production set `UNWEB_ENV=production` and `UNWEB_AUTH_PROXY_SECRET` to a high-entropy secret shared only with the proxy. The proxy must authenticate users, strip any incoming `X-UnWeb-Auth-Token` and `X-UnWeb-Auth-User` headers supplied by clients, and inject those headers itself: the token header contains the shared secret and the user header contains the authenticated stable user ID. The API rejects missing/invalid identities and scopes persisted scan history/details to that user. Production startup fails closed if the shared secret is absent. Keep the API private behind the proxy; do not expose its port directly. This is an integration point for an identity provider/reverse proxy, not a built-in login system. In local development with no gateway configured, all scans belong to the single `local` owner.
