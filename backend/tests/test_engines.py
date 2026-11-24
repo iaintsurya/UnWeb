@@ -84,3 +84,34 @@ def test_cookie_header_lookup_is_case_insensitive():
         "https://example.com/",
     )
     assert any(item.id == "cookie-sid-missing-secure" for item in findings)
+
+
+
+def test_present_but_ineffective_security_headers_are_reported():
+    findings = analyze_security(
+        {
+            "x-content-type-options": "nosniff, nosniff",
+            "strict-transport-security": "includeSubDomains; max-age=0",
+            "content-security-policy": "   ",
+        },
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert "invalid-x-content-type-options" in ids
+    assert "ineffective-strict-transport-security" in ids
+    assert "empty-content-security-policy" in ids
+
+
+def test_effective_hsts_and_nosniff_do_not_trigger_weak_value_findings():
+    findings = analyze_security(
+        {
+            "x-content-type-options": "nosniff",
+            "strict-transport-security": "max-age=31536000; includeSubDomains",
+            "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+        },
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert "invalid-x-content-type-options" not in ids
+    assert "ineffective-strict-transport-security" not in ids
+    assert "empty-content-security-policy" not in ids
