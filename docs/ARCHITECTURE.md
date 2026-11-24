@@ -61,7 +61,7 @@ The proxy denies non-CONNECT traffic and any host/port other than the initial ta
 
 **Mandatory external controls:** run the image as a non-root user in a disposable container with Chromium sandboxing available; apply a per-job default-deny egress policy that allows only the validated public target IP address(es) on the target HTTPS port and DNS only through a resolver restricted to the target hostname; deny loopback, private, link-local, multicast, IPv6 ULA, cloud metadata, and all other destinations; and enforce CPU, memory, process, and wall-clock limits. A standard Docker bridge network is not enough. The CLI acknowledgement flag does not inspect or enforce those controls. Since response byte counts are based on declared Content-Length headers, they are not a hard transfer cap.
 
-Cross-origin subresources are blocked, so pages that depend on third-party CSS, fonts, images, or scripts may render incompletely. The worker currently handles one unauthenticated HTTPS page per process. It does not click links, submit forms, use a saved browser profile, or write scan output to SQLite. It is intentionally not callable from the API until UnWeb has a durable job queue and a separately managed worker pool with enforceable per-job network policy.
+Cross-origin subresources are blocked, so pages that depend on third-party CSS, fonts, images, or scripts may render incompletely. The worker currently handles one unauthenticated HTTPS page per job. It does not click links, submit forms, use a saved browser profile, or perform active vulnerability validation. API-managed jobs are owner-scoped in SQLite, dispatched through a Redis Streams consumer group, revalidated against the owner's current DNS-verified target grant immediately before execution, and stored with bounded evidence. The API exposes job creation/status/cancellation endpoints and a worker-heartbeat health endpoint. The production Compose stack mounts the same persistent SQLite volume into the API and one browser worker; do not scale either service against this single-instance SQLite deployment. The worker remains dependent on externally enforced default-deny egress controls.
 
 ## Local repository analysis prototype
 
@@ -116,7 +116,7 @@ Coverage must be explicit. A scanner result should say which checks ran, which w
 
 ## Persistence
 
-The preview uses the Python standard library's SQLite driver. Scan payloads are stored as JSON with indexed summary columns; the newest 250 results are retained by default. This avoids requiring a separate database service for local use. It is a single-instance development store, not a horizontally scalable production database. The path is configurable through `UNWEB_DB_PATH`.
+The preview uses the Python standard library's SQLite driver. Scan payloads, owner-scoped browser job state/results, target authorizations and audit events are stored in SQLite; Redis Streams provides durable browser-job dispatch and Redis also provides shared rate limits. The production Compose baseline mounts a persistent SQLite volume into one API and one browser worker. This is a single-instance deployment, not a horizontally scalable database architecture. The path is configurable through `UNWEB_DB_PATH`.
 
 Before multi-user or enterprise use, storage must evolve to support authenticated ownership, job state, immutable audit records, evidence retention/redaction policies, and safe multi-instance concurrency.
 
