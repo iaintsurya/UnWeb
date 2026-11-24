@@ -109,7 +109,7 @@ async def create_scan(payload: ScanRequest, request: Request):
             ) from exc
 
         result = await asyncio.wait_for(
-            scan_site(payload.url, payload.max_pages, True),
+            scan_site(payload.url, payload.max_pages, True, payload.scope_paths),
             timeout=SCAN_TIMEOUT_SECONDS,
         )
         await asyncio.to_thread(database.save_scan, result)
