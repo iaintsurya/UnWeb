@@ -36,9 +36,11 @@ The browser worker does not log in, submit forms, execute user-provided scripts,
 ## Repository analysis
 
 - `POST /api/repository-scans` — raw ZIP request body with `Content-Type: application/zip`, `X-UnWeb-Authorised: true`, and optional URL-encoded `X-Repository-Filename`. Streams up to 50 MB into a temporary file, analyses it, returns JSON, and deletes the archive.
+- `GET /api/repository-reports?limit=20` — recent owner-scoped repository assessment summaries (limit 1–100).
+- `GET /api/repository-reports/{report_id}` — complete saved repository report; reports owned by another user return 404.
 - `POST /api/github-repository-scans` — JSON body such as `{"repository_url":"https://github.com/owner/repository","ref":"main","authorised":true}`. Accepts canonical public GitHub repository URLs, resolves the ref to an immutable commit SHA, streams a source ZIP from the approved GitHub archive host (maximum 50 MB), analyses it, returns commit identity and deletes the temporary archive. Omit `ref` to use the repository default branch.
 
-The acknowledgement is not authentication. Public GitHub ingestion does not support private repositories, OAuth/App installation or personal access tokens. Repository reports are returned to the caller and are not persisted. The Repository workspace exports the report as JSON or SARIF 2.1.0; SARIF findings preserve stable IDs, source locations, severity, confidence and suspected validation state.
+The acknowledgement is not authentication. Public GitHub ingestion does not support private repositories, OAuth/App installation or personal access tokens. ZIP and GitHub repository reports are persisted under the authenticated owner in SQLite (latest 100 per owner) and returned to the caller. The Repository workspace lists and reloads saved reports and exports them as JSON or SARIF 2.1.0; SARIF findings preserve stable IDs, source locations, severity, confidence and suspected validation state.
 
 ## Dependency advisory lookup
 
