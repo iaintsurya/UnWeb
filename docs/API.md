@@ -59,3 +59,10 @@ Scan history and scan-detail endpoints are filtered by the authenticated user id
 ## Audit events
 
 Completed website scans, ZIP repository analyses, public GitHub repository analyses, and dependency advisory lookups write minimal owner-scoped audit events. The authenticated user can read their own events through `GET /api/audit-events`. Event records contain an action, resource identifier where applicable, UTC timestamp, and small allowlisted metadata; they do not store scan response bodies, secrets, cookies, or repository archives. The database retains up to 1,000 events per owner. These application audit records are useful for traceability but are not tamper-proof: production deployments should forward logs to an independently controlled append-only logging system.
+
+
+## Shared rate limiting and production deployment
+
+Production startup requires `UNWEB_REDIS_URL` in addition to the trusted authentication gateway secret. The API pings Redis at startup and installs atomic Redis Lua sliding-window limiters shared across API processes: 10 website scan submissions/minute/user, 5 repository analyses/minute/user (ZIP and GitHub share this bucket), and 10 dependency advisory lookups/minute/user. Redis server time is used for consistent windows. If Redis becomes unavailable, rate-limited endpoints fail closed with HTTP 503 rather than silently falling back to a process-local limiter. The in-memory limiter remains for local development and unit tests.
+
+The production Compose deployment runs one API worker with SQLite on a persistent volume, Redis on an internal-only network, and a non-root frontend container. It does not publish API or frontend ports to the host: an external trusted ingress/authentication gateway must be attached to the ingress network and route users to the frontend. The gateway must protect both the UI and all `/api/` routes, strip client-supplied identity headers, and inject the configured secret and authenticated stable user ID. The API must not be exposed directly. See `docs/DEPLOYMENT.md` for setup and network requirements.
