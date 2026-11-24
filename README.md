@@ -94,8 +94,7 @@ Set `UNWEB_DB_PATH` in the backend process environment to use a different databa
 
 ## API
 
-- `GET /api/health` and `GET /api/health/ready`; `GET /api/health/browser-worker` reports the Redis-stream worker heartbeat.
-- `GET /api/health`
+- `GET /api/health` — liveness; `GET /api/health/ready` — SQLite/Redis readiness; `GET /api/health/browser-worker` — live browser-worker heartbeat.
 - `POST /api/scans` with `{"url":"https://example.com","max_pages":8,"authorised":true}`; the explicit acknowledgement is not authentication or proof of ownership.
 - `POST /api/repository-scans` with a raw ZIP request body, `Content-Type: application/zip`, `X-UnWeb-Authorised: true`, and optional URL-encoded `X-Repository-Filename`; streams up to 50 MB into a temporary file, analyses it, returns JSON, and deletes the archive.
 - `POST /api/github-repository-scans` with JSON `{"repository_url":"https://github.com/owner/repository","ref":"main","authorised":true}`; accepts public canonical GitHub repository URLs only, resolves the ref to a 40-character commit SHA, streams a source ZIP from GitHub's approved archive host (maximum 50 MB), analyses it, returns the commit identity with the report, and deletes the temporary archive. Omit `ref` to use the repository default branch.
@@ -104,6 +103,7 @@ Set `UNWEB_DB_PATH` in the backend process environment to use a different databa
 - `GET /api/scans/{scan_id}/intelligence`
 - `GET /api/scans/{scan_id}/sitemap` — observed page nodes and directed same-origin link edges
 - `GET /api/scans/{scan_id}/security`
+- `POST /api/browser-jobs` with a verified `target_id`, HTTPS URL, approved path prefixes, request budget and `authorised:true`; returns a queued owner-scoped job. `GET /api/browser-jobs`, `GET /api/browser-jobs/{job_id}`, and `POST /api/browser-jobs/{job_id}/cancel` manage jobs. The worker must be running and the deployment must enforce external egress policy.
 - `POST /api/dependency-advisories` with JSON `{"authorised":true,"packages":[{"name":"requests","ecosystem":"PyPI","version":"2.31.0"}]}`; queries OSV for exact resolved versions (npm, PyPI/Python, Go, crates.io/Cargo), up to 100 unique package coordinates and a 2 MB response budget. This is advisory matching, not a complete dependency audit or proof of safety.
 - `GET /api/scans/{scan_id}/reconstruction`
 
