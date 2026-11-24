@@ -272,3 +272,27 @@ def test_github_repository_scan_rejects_invalid_repository_url():
         )
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "invalid_github_repository_url"
+
+
+
+def test_dependency_advisory_api_requires_authorisation():
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/dependency-advisories",
+            json={"packages": [{"name": "requests", "ecosystem": "PyPI", "version": "2.31.0"}]},
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "dependency_advisory_authorisation_required"
+
+
+def test_dependency_advisory_api_rejects_invalid_package_versions():
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/dependency-advisories",
+            json={
+                "authorised": True,
+                "packages": [{"name": "requests", "ecosystem": "PyPI", "version": ""}],
+            },
+        )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "invalid_dependency_batch"
