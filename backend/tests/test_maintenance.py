@@ -51,7 +51,12 @@ def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path, mon
     with pytest.raises(FileExistsError):
         restore_database(backup, destination)
 
+    # A stale shared-memory sidecar must not be carried into the restored DB.
+    destination.write_bytes(source.read_bytes())
+    stale_shm = Path(f"{destination}-shm")
+    stale_shm.write_bytes(b"stale sidecar")
     restore_database(backup, destination, overwrite=True)
+    assert not stale_shm.exists()
     with sqlite3.connect(destination) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute(
