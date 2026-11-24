@@ -669,3 +669,38 @@ def test_auth_middleware_only_exempts_exact_health_routes(monkeypatch):
     assert live.status_code == 200
     assert ready.status_code == 200
     assert lookalike.status_code == 401
+
+
+def test_browser_worker_health_reports_missing_configuration(monkeypatch):
+    monkeypatch.setattr(main, "REDIS_CLIENT", None)
+    with TestClient(main.app) as client:
+        response = client.get("/api/health/browser-worker")
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_configured"
+
+
+@pytest.mark.parametrize(
+    ("heartbeat", "ttl", "status_code", "expected"),
+    [
+        ("worker-1", 42, 200, "online"),
+        (None, -2, 503, "offline"),
+        ("worker-1", 0, 503, "offline"),
+    ],
+)
+def test_browser_worker_health_reports_heartbeat_state(
+    monkeypatch, heartbeat, ttl, status_code, expected
+):
+    class FakeRedis:
+        def get(self, key):
+            assert key == "unweb:browser-worker:heartbeat"
+            return heartbeat
+
+        def ttl(self, key):
+            assert key == "unweb:browser-worker:heartbeat"
+            return ttl
+
+    monkeypatch.setattr(main, "REDIS_CLIENT", FakeRedis())
+    with TestClient(main.app) as client:
+        response = client.get("/api/health/browser-worker")
+    assert response.status_code == status_code
+    assert response.json()["status"] == expected
