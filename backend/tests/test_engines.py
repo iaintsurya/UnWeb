@@ -157,3 +157,13 @@ def test_public_cors_without_credentials_is_not_mislabeled_as_credentialed_acces
     cors = next(item for item in findings if item.id == "cors-wildcard-origin")
     assert "does not by itself demonstrate access to private or credentialed data" in cors.evidence
     assert not any(item.id == "cors-credential-theft" for item in findings)
+
+
+def test_version_disclosure_requires_a_version_like_header_value():
+    findings = analyze_security(
+        {"server": "ExampleServer", "x-powered-by": ""},
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert "server-version-disclosure" not in ids
+    assert "technology-header-disclosure" not in ids
