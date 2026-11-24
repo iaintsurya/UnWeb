@@ -125,7 +125,7 @@ async def create_scan(payload: ScanRequest, request: Request):
             },
         )
 
-    client_key = request.client.host if request.client else "unknown"
+    client_key = request.state.user_id
     retry_after = SCAN_RATE_LIMITER.check(client_key)
     if retry_after:
         raise HTTPException(
@@ -316,7 +316,7 @@ async def create_repository_scan(request: Request):
 
 
 @app.post("/api/github-repository-scans")
-async def create_github_repository_scan(payload: GitHubRepositoryScanRequest):
+async def create_github_repository_scan(payload: GitHubRepositoryScanRequest, request: Request):
     """Analyse a public GitHub repository after an explicit owner-authorisation acknowledgement."""
     if not payload.authorised:
         raise HTTPException(
@@ -327,7 +327,7 @@ async def create_github_repository_scan(payload: GitHubRepositoryScanRequest):
             },
         )
 
-    retry_after = REPOSITORY_SCAN_LIMITER.check("github-source")
+    retry_after = REPOSITORY_SCAN_LIMITER.check(request.state.user_id)
     if retry_after:
         raise HTTPException(
             429,
