@@ -5,6 +5,7 @@ The API is a local engineering preview. It does not currently authenticate users
 ## Health and website scans
 
 - `GET /api/health` — service status and version.
+- `GET /api/audit-events?limit=50` — recent owner-scoped audit events (limit 1–100).
 - `POST /api/scans` — JSON body such as `{"url":"https://example.com","max_pages":8,"authorised":true}`. Requires `authorised: true`; accepts 1–30 pages. The scan is constrained to the submitted scheme/host/port origin, including initial redirects, later page requests and JavaScript fetches.
 - `GET /api/scans?limit=20` — recent scan summaries; limit 1–100.
 - `GET /api/scans/{scan_id}` — complete stored scan result.
@@ -53,3 +54,8 @@ The API supports identity injection from a trusted reverse proxy. Configure both
 For every request under `/api/` except `/api/health`, the proxy must authenticate the user, **remove any client-supplied** `X-UnWeb-Auth-Token` and `X-UnWeb-Auth-User` headers, then inject `X-UnWeb-Auth-Token` with the shared secret and `X-UnWeb-Auth-User` with the authenticated stable user identifier. The API compares the secret in constant time, validates the user identifier, and returns 401 when the identity is absent or invalid. The backend must not be reachable directly from untrusted networks; restrict it to the proxy at the network layer and use TLS between proxy and API where they cross hosts.
 
 Scan history and scan-detail endpoints are filtered by the authenticated user identifier. Existing SQLite records are migrated with owner `local`; they are not automatically reassigned to newly authenticated users. In non-production development mode, requests without a configured gateway retain the single local owner. Production startup fails if the gateway secret is missing. This is a **trusted-proxy integration**, not a built-in account/password or OAuth system; user login, account lifecycle, MFA, team sharing and role-based access remain responsibilities of the identity gateway and future product work.
+
+
+## Audit events
+
+Completed website scans, ZIP repository analyses, public GitHub repository analyses, and dependency advisory lookups write minimal owner-scoped audit events. The authenticated user can read their own events through `GET /api/audit-events`. Event records contain an action, resource identifier where applicable, UTC timestamp, and small allowlisted metadata; they do not store scan response bodies, secrets, cookies, or repository archives. The database retains up to 1,000 events per owner. These application audit records are useful for traceability but are not tamper-proof: production deployments should forward logs to an independently controlled append-only logging system.
