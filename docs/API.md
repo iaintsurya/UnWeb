@@ -1,6 +1,6 @@
 # API reference
 
-The API is a local engineering preview. In production it relies on a trusted reverse-proxy identity gateway and owner-scoped records; it does not provide built-in login or an OIDC provider. Operator acknowledgement fields are not authentication or proof of permission.
+The API is a local engineering preview. It does not currently authenticate users or enforce per-user scan ownership. Do not expose it as a public multi-user service. The operator acknowledgement fields below are not authentication or proof of permission.
 
 ## Health and website scans
 

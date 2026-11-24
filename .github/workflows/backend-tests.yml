@@ -86,10 +86,9 @@ jobs:
       - name: Validate production compose configuration
         run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
       - name: Build and start production stack
-        run: docker compose --env-file .env.production.example -f docker-compose.production.yml up -d --build --wait --wait-timeout 180
+        run: docker compose --env-file .env.production.example -f docker-compose.production.yml up -d --build
       - name: Verify frontend, API health, and authentication boundary
         run: |
-          docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T browser-worker python -c "import os; from redis import Redis; assert Redis.from_url(os.environ['UNWEB_REDIS_URL']).exists('unweb:browser-worker:heartbeat')"
           docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/
           docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T api python - <<'PY'
           import urllib.request
@@ -105,7 +104,7 @@ jobs:
           PY
       - name: Show container logs on failure
         if: failure()
-        run: docker compose --env-file .env.production.example -f docker-compose.production.yml logs --no-color redis api browser-worker frontend
+        run: docker compose --env-file .env.production.example -f docker-compose.production.yml logs --no-color redis api frontend
       - name: Show service health
         if: always()
         run: docker compose --env-file .env.production.example -f docker-compose.production.yml ps

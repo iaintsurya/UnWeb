@@ -521,10 +521,10 @@ def _scope_contains(allowed: str, requested: str) -> bool:
 def _path_in_scope(url: str, scope_paths: list[str]) -> bool:
     from urllib.parse import unquote
     path = urlsplit(url).path or "/"
-    if re.search(r"%(?:2f|5c)", path, re.IGNORECASE) or "\\\\" in path:
+    if re.search(r"%(?:2f|5c)", path, re.IGNORECASE) or chr(92) in path:
         return False
     decoded = unquote(path)
-    if "\\\\" in decoded or any(part in {".", ".."} for part in decoded.split("/")):
+    if chr(92) in decoded or any(part in {".", ".."} for part in decoded.split("/")):
         return False
     return any(_scope_contains(prefix, decoded) for prefix in scope_paths)
 
@@ -593,7 +593,7 @@ async def run_browser_worker() -> None:
     await asyncio.to_thread(browser_jobs.recover_interrupted_jobs)
     consumer = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
     while True:
-        await asyncio.to_thread(client.set, 'unweb:browser-worker:heartbeat', consumer, ex=30)
+        await asyncio.to_thread(client.set, 'unweb:browser-worker:heartbeat', consumer, ex=90)
         reclaimed = await asyncio.to_thread(
             client.xautoclaim, browser_jobs.STREAM_NAME, browser_jobs.CONSUMER_GROUP,
             consumer, 60_000, "0-0", 1
