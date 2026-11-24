@@ -235,3 +235,8 @@ See [Production deployment guide](docs/DEPLOYMENT.md). The deployment requires a
 ## Verified website targets
 
 Production scans require a target authorization created in the dashboard's **Target ownership verification** panel. UnWeb generates a one-time DNS TXT challenge for the exact hostname, verifies it, and grants a 30-day owner-scoped scope limited to selected ports and path prefixes. Users can revoke grants at any time. This proves DNS control at verification time; it does not replace legal permission for every service behind the domain or external egress firewall policy.
+
+
+## Code-scanning export
+
+Repository assessments can be exported as JSON or SARIF 2.1.0 from the Repository workspace. SARIF output includes stable rule IDs and finding fingerprints, source-file locations, severity-to-level mapping, confidence and validation-state properties, remediation guidance, and repository commit metadata when available. UnWeb source indicators remain heuristic and marked as suspected; importing SARIF into a code-scanning platform does not turn them into confirmed vulnerabilities.
