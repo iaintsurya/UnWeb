@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ScanRequest(BaseModel):
@@ -7,6 +7,13 @@ class ScanRequest(BaseModel):
     max_pages: int = Field(default=8, ge=1, le=30)
     authorised: bool = False
     scope_paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=20)
+
+    @field_validator("ports")
+    @classmethod
+    def validate_ports(cls, ports: list[int]) -> list[int]:
+        if any(port < 1 or port > 65535 for port in ports):
+            raise ValueError("Ports must be between 1 and 65535.")
+        return list(dict.fromkeys(ports))
     target_id: str | None = Field(default=None, max_length=64)
 
 
