@@ -101,8 +101,8 @@ async def require_trusted_identity(request: Request, call_next):
     return await call_next(request)
 
 
-# Keep resource use bounded in the preview server. The in-process limiter is
-# a local abuse guard, not a substitute for shared, identity-aware production controls.
+# Development defaults use in-process limiters; production startup replaces them
+# with shared Redis-backed, authenticated-user sliding windows.
 SCAN_SEMAPHORE = asyncio.Semaphore(2)
 SCAN_RATE_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 SCAN_QUEUE_TIMEOUT = 0.5
@@ -263,7 +263,6 @@ async def create_repository_scan(request: Request):
                 detail={"code": "invalid_content_length", "message": "Invalid Content-Length header."},
             )
 
-    client_key = request.client.host if request.client else "unknown"
     retry_after = await _check_rate_limit(REPOSITORY_SCAN_LIMITER, request.state.user_id)
     if retry_after:
         raise HTTPException(
@@ -462,7 +461,6 @@ async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Req
             },
         )
 
-    client_key = request.client.host if request.client else "unknown"
     retry_after = await _check_rate_limit(ADVISORY_LOOKUP_LIMITER, request.state.user_id)
     if retry_after:
         raise HTTPException(
