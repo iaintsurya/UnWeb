@@ -236,6 +236,7 @@ def save_target_challenge(
     expires_at: str,
 ) -> None:
     with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         connection.execute(
             "DELETE FROM target_challenges WHERE expires_at <= ? OR (used_at IS NOT NULL AND used_at < ?)",
             (created_at, created_at),
@@ -285,6 +286,7 @@ def verify_target_challenge(
     target_expires_at: str,
 ) -> dict[str, object] | None:
     with _connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
             """SELECT hostname, ports_json, scope_paths_json, token_hash, expires_at, used_at
             FROM target_challenges WHERE challenge_id = ? AND owner_id = ?""",
