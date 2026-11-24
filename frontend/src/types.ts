@@ -21,3 +21,17 @@ export type AdvisoryReport={provider:string;packages_checked:number;packages_wit
 
 export type AuthorizedTarget={target_id:string;hostname:string;ports:number[];scope_paths:string[];verified_at:string;expires_at:string};
 export type TargetChallenge={challenge_id:string;hostname:string;record_name:string;record_type:"TXT";record_value:string;ports:number[];scope_paths:string[];expires_at:string;instructions:string};
+
+export type BrowserJobStatus="queued"|"running"|"completed"|"failed"|"cancelled";
+export type BrowserJob={
+ job_id:string;target_id:string|null;url:string;scope_paths:string[];max_requests:number;
+ status:BrowserJobStatus;created_at:string;updated_at:string;started_at:string|null;
+ finished_at:string|null;error_code:string|null;result?:BrowserRenderResult;
+};
+export type BrowserRenderResult={
+ engine:string;target_url:string;final_url:string;navigation_status:number|null;
+ navigation_error_type:string|null;title:string;
+ dom:{title:string;description:string;headings:{level:number;text:string}[];links:{text:string;url:string}[];images:{url:string;alt:string;width:number;height:number}[];stylesheetLinks:string[];scriptLinks:string[];landmarks:{main:number;navigation:number;header:number;footer:number};styles:Record<string,{color:string;backgroundColor:string;fontFamily:string;fontSize:string;fontWeight:string;lineHeight:string;display:string}|null>;classSamples:string[];document:{width:number;height:number;viewportWidth:number;viewportHeight:number;characterCount:number}}|null;
+ network:{request_count:number;blocked_request_count:number;requests:{url:string;method:string;resource_type:string}[];responses:{url:string;status:number;content_type:string;content_length_declared:number|null}[];failed_requests:{url:string;resource_type:string}[];declared_response_bytes:number;websockets:string[];proxy_connections:number;proxy_denials:number};
+ browser_errors:{console_error_count:number;page_error_count:number};limitations:string[];
+};
