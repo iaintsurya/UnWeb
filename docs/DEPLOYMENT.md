@@ -75,7 +75,7 @@ Update code only after CI passes, rebuild with Compose, and retain a known-good 
 
 ## 6. Verify the deployment
 
-- `GET /api/health` returns service health; it does not prove that auth or egress policy is correct.
+- `GET /api/health` is a liveness check. `GET /api/health/ready` verifies SQLite and Redis availability; neither endpoint proves that authentication or egress policy is correct.
 - An unauthenticated request to any other `/api/` route must return HTTP 401.
 - A request passing through the trusted gateway must receive the gateway-injected identity and be able to access only its own scans and audit events.
 - Confirm a user cannot fetch another user's scan ID (the API should return 404).
