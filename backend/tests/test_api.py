@@ -64,6 +64,10 @@ def test_scan_api_persists_result_and_lists_history(tmp_path, monkeypatch):
         assert security.status_code == 200
         assert security.json()["security_findings"] == []
 
+        audit = client.get("/api/audit-events")
+        assert audit.status_code == 200
+        assert audit.json()["items"][0]["action"] == "website_scan.completed"
+
 
 def test_scan_api_returns_404_for_unknown_saved_scan(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "missing.sqlite3")
