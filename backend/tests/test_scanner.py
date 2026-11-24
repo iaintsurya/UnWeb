@@ -322,3 +322,26 @@ def test_crawler_does_not_fetch_or_report_pages_outside_scope(monkeypatch):
         "https://example.com/app/users",
     ]
     assert result.scope_paths == ["/app"]
+
+
+def test_safe_fetch_rejects_out_of_scope_url_before_dns(monkeypatch):
+    def unexpected_resolve(url):
+        raise AssertionError("Out-of-scope URL must be rejected before DNS resolution")
+
+    monkeypatch.setattr(scanner, "validate_resolved_addresses", unexpected_resolve)
+    with pytest.raises(scanner.URLRejected, match="outside the approved path scope"):
+        asyncio.run(
+            scanner.safe_fetch(
+                "https://example.com/admin",
+                allowed_paths=["/app"],
+            )
+        )
+
+
+def test_encoded_path_separators_are_not_scope_ambiguous():
+    assert not scanner._path_in_scope(
+        "https://example.com/app%2f..%2fadmin",
+        ["/app"],
+    )
+    with pytest.raises(scanner.URLRejected, match="Encoded path separators"):
+        scanner.normalize_scope_paths(["/app%2fadmin"])
