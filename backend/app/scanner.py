@@ -187,7 +187,10 @@ async def safe_fetch(
 
 async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bool = True):
     start = normalize_url(raw_url)
-    final_url, status, headers, body = await safe_fetch(start)
+    # The operator authorised the requested origin, not an arbitrary redirect target.
+    # Enforce that boundary on the very first response as well as later crawl requests.
+    requested_origin = _origin(start)
+    final_url, status, headers, body = await safe_fetch(start, allowed_origin=requested_origin)
     if not _is_html(headers):
         raise UnsupportedContentType("The target returned a non-HTML response. UnWeb analyses HTML pages.")
 
