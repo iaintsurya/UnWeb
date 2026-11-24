@@ -1,5 +1,7 @@
 import asyncio
 import os
+import re
+import secrets
 import tempfile
 from pathlib import Path
 from urllib.parse import unquote
@@ -9,6 +11,7 @@ from collections.abc import AsyncIterator
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 
 from . import database
 from .models import ScanRequest, ScanResult, GitHubRepositoryScanRequest
@@ -21,7 +24,14 @@ from .models import DependencyAdvisoryRequest
 from .dependency_advisories import query_advisories, AdvisoryLookupError
 
 @asynccontextmanager
+AUTH_PROXY_SECRET = os.environ.get("UNWEB_AUTH_PROXY_SECRET", "")
+UNWEB_ENV = os.environ.get("UNWEB_ENV", "development").strip().lower()
+
+
+@asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if UNWEB_ENV == "production" and not AUTH_PROXY_SECRET:
+        raise RuntimeError("UNWEB_AUTH_PROXY_SECRET is required when UNWEB_ENV=production.")
     await asyncio.to_thread(database.initialize_database)
     yield
 
@@ -43,8 +53,43 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-UnWeb-Authorised", "X-Repository-Filename"],
+    allow_headers=["Content-Type", "X-UnWeb-Authorised", "X-Repository-Filename", "X-UnWeb-Auth-Token", "X-UnWeb-Auth-User"],
 )
+
+
+
+@app.middleware("http")
+async def require_trusted_identity(request: Request, call_next):
+    """Trust identity only from a reverse proxy holding the configured shared secret."""
+    if not request.url.path.startswith("/api/") or request.url.path == "/api/health":
+        return await call_next(request)
+
+    if not AUTH_PROXY_SECRET:
+        if UNWEB_ENV == "production":
+            return JSONResponse(
+                status_code=503,
+                content={"detail": {"code": "auth_proxy_not_configured", "message": "Trusted authentication is not configured."}},
+            )
+        request.state.user_id = "local"
+        return await call_next(request)
+
+    supplied_secret = request.headers.get("x-unweb-auth-token", "")
+    user_id = request.headers.get("x-unweb-auth-user", "").strip()
+    if (
+        not secrets.compare_digest(supplied_secret, AUTH_PROXY_SECRET)
+        or not user_id
+        or len(user_id) > 128
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9@._:+-]*", user_id)
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": {"code": "authentication_required", "message": "Sign in through the configured authentication gateway."}},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    request.state.user_id = user_id
+    return await call_next(request)
+
 
 # Keep resource use bounded in the preview server. The in-process limiter is
 # a local abuse guard, not a substitute for shared, identity-aware production controls.
@@ -58,8 +103,8 @@ REPOSITORY_SCAN_QUEUE_TIMEOUT = 0.5
 ADVISORY_LOOKUP_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 
 
-async def load_scan(scan_id: str) -> ScanResult:
-    result = await asyncio.to_thread(database.get_scan, scan_id)
+async def load_scan(scan_id: str, owner_id: str) -> ScanResult:
+    result = await asyncio.to_thread(database.get_scan, scan_id, owner_id)
     if result is None:
         raise HTTPException(404, detail="Scan not found.")
     return result
@@ -112,7 +157,7 @@ async def create_scan(payload: ScanRequest, request: Request):
             scan_site(payload.url, payload.max_pages, True, payload.scope_paths),
             timeout=SCAN_TIMEOUT_SECONDS,
         )
-        await asyncio.to_thread(database.save_scan, result)
+        await asyncio.to_thread(database.save_scan, result, request.state.user_id)
         return result
     except asyncio.TimeoutError as exc:
         raise HTTPException(
@@ -403,18 +448,18 @@ async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Req
 
 
 @app.get("/api/scans")
-async def scan_history(limit: int = Query(default=20, ge=1, le=100)):
-    return {"items": await asyncio.to_thread(database.list_scans, limit)}
+async def scan_history(request: Request, limit: int = Query(default=20, ge=1, le=100)):
+    return {"items": await asyncio.to_thread(database.list_scans, limit, request.state.user_id)}
 
 
 @app.get("/api/scans/{scan_id}", response_model=ScanResult)
-async def get_scan(scan_id: str):
-    return await load_scan(scan_id)
+async def get_scan(scan_id: str, request: Request):
+    return await load_scan(scan_id, request.state.user_id)
 
 
 @app.get("/api/scans/{scan_id}/intelligence")
-async def intelligence(scan_id: str):
-    result = await load_scan(scan_id)
+async def intelligence(scan_id: str, request: Request):
+    result = await load_scan(scan_id, request.state.user_id)
     return {
         "id": result.id,
         "url": result.final_url,
@@ -426,8 +471,8 @@ async def intelligence(scan_id: str):
 
 
 @app.get("/api/scans/{scan_id}/sitemap")
-async def sitemap(scan_id: str):
-    result = await load_scan(scan_id)
+async def sitemap(scan_id: str, request: Request):
+    result = await load_scan(scan_id, request.state.user_id)
     page_ids = {page.url: str(index) for index, page in enumerate(result.pages)}
     edges = [
         {"source": page_ids[edge.source], "target": page_ids[edge.target]}
@@ -449,8 +494,8 @@ async def sitemap(scan_id: str):
 
 
 @app.get("/api/scans/{scan_id}/security")
-async def security(scan_id: str):
-    result = await load_scan(scan_id)
+async def security(scan_id: str, request: Request):
+    result = await load_scan(scan_id, request.state.user_id)
     return {
         "findings": result.findings,
         "security_findings": result.security_findings,
@@ -458,6 +503,6 @@ async def security(scan_id: str):
 
 
 @app.get("/api/scans/{scan_id}/reconstruction")
-async def reconstruction(scan_id: str):
-    result = await load_scan(scan_id)
+async def reconstruction(scan_id: str, request: Request):
+    result = await load_scan(scan_id, request.state.user_id)
     return result.reconstruction or {}
