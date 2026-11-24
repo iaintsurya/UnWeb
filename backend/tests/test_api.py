@@ -448,3 +448,21 @@ def test_scan_rate_limit_is_scoped_to_authenticated_user(tmp_path, monkeypatch):
     assert alice_first.status_code == 200
     assert alice_second.status_code == 429
     assert bob_first.status_code == 200
+
+
+def test_scan_api_fails_closed_when_shared_rate_limit_store_is_unavailable(monkeypatch):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    class UnavailableLimiter:
+        def check(self, key):
+            raise RedisConnectionError("redis unavailable")
+
+    monkeypatch.setattr(main, "SCAN_RATE_LIMITER", UnavailableLimiter())
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/scans",
+            json={"url": "https://example.com/", "authorised": True},
+        )
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "rate_limit_store_unavailable"
+    assert response.headers["retry-after"] == "5"
