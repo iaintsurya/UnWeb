@@ -592,17 +592,20 @@ async def create_target_challenge(payload: TargetAuthorizationChallengeRequest, 
     token_value = f"unweb-verification={token}"
     token_hash = hashlib.sha256(token_value.encode("utf-8")).hexdigest()
     expires_at = (now + TARGET_CHALLENGE_TTL).isoformat()
-    await asyncio.to_thread(
-        database.save_target_challenge,
-        challenge_id,
-        request.state.user_id,
-        hostname,
-        ports,
-        scope_paths,
-        token_hash,
-        now.isoformat(),
-        expires_at,
-    )
+    try:
+        await asyncio.to_thread(
+            database.save_target_challenge,
+            challenge_id,
+            request.state.user_id,
+            hostname,
+            ports,
+            scope_paths,
+            token_hash,
+            now.isoformat(),
+            expires_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(429, detail={"code": "too_many_pending_target_challenges", "message": str(exc)}) from exc
     await asyncio.to_thread(database.record_audit_event, request.state.user_id, "target_authorization.challenge_created", hostname, {"ports": ports, "scope_paths": scope_paths})
     return {
         "challenge_id": challenge_id,
