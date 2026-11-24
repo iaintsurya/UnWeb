@@ -75,3 +75,15 @@ async def test_query_advisories_handles_provider_failure():
             [{"name": "pkg", "ecosystem": "npm", "version": "1.0"}],
             transport=httpx.MockTransport(handler),
         )
+
+
+@pytest.mark.anyio
+async def test_query_advisories_rejects_oversized_provider_response():
+    def handler(request):
+        return httpx.Response(200, content=b" " * 2_000_001)
+
+    with pytest.raises(AdvisoryLookupError, match="2 MB"):
+        await query_advisories(
+            [{"name": "pkg", "ecosystem": "npm", "version": "1.0"}],
+            transport=httpx.MockTransport(handler),
+        )
