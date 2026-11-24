@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 import io
 import json
 import zipfile
@@ -485,3 +486,78 @@ def test_production_startup_requires_shared_redis(monkeypatch):
     with pytest.raises(RuntimeError, match="UNWEB_REDIS_URL"):
         with TestClient(main.app):
             pass
+
+
+def test_target_dns_challenge_and_verification_flow_is_owner_scoped(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "target-api.sqlite3")
+    monkeypatch.setattr(main, "TARGET_AUTH_LIMITER", SlidingWindowLimiter(10, 60))
+    with TestClient(main.app) as client:
+        created = client.post(
+            "/api/targets/challenges",
+            json={"hostname": "Example.com", "ports": [443], "scope_paths": ["/app"]},
+        )
+        assert created.status_code == 200
+        challenge = created.json()
+        assert challenge["hostname"] == "example.com"
+        assert challenge["record_name"] == "_unweb-verification.example.com"
+        assert challenge["record_type"] == "TXT"
+        assert challenge["record_value"].startswith("unweb-verification=")
+
+        monkeypatch.setattr(main, "lookup_target_dns_txt", lambda hostname: [challenge["record_value"]])
+        verified = client.post(f"/api/targets/challenges/{challenge['challenge_id']}/verify")
+        assert verified.status_code == 200
+        target = verified.json()
+        assert target["hostname"] == "example.com"
+        assert target["scope_paths"] == ["/app"]
+
+        listed = client.get("/api/targets")
+        assert listed.status_code == 200
+        assert listed.json()["items"][0]["target_id"] == target["target_id"]
+
+        revoked = client.post(f"/api/targets/{target['target_id']}/revoke")
+        assert revoked.status_code == 200
+        assert revoked.json()["revoked"] is True
+        assert client.get("/api/targets").json()["items"] == []
+
+
+def test_target_dns_challenge_rejects_ip_addresses_and_malformed_hosts():
+    with TestClient(main.app) as client:
+        ip = client.post("/api/targets/challenges", json={"hostname": "8.8.8.8"})
+        malformed = client.post("/api/targets/challenges", json={"hostname": "https://example.com/path"})
+    assert ip.status_code == 422
+    assert malformed.status_code == 422
+
+
+def test_target_verification_requires_dns_txt_proof(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "target-missing-proof.sqlite3")
+    monkeypatch.setattr(main, "TARGET_AUTH_LIMITER", SlidingWindowLimiter(10, 60))
+    monkeypatch.setattr(main, "lookup_target_dns_txt", lambda hostname: [])
+    with TestClient(main.app) as client:
+        created = client.post("/api/targets/challenges", json={"hostname": "example.com"})
+        challenge_id = created.json()["challenge_id"]
+        response = client.post(f"/api/targets/challenges/{challenge_id}/verify")
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "target_dns_proof_missing"
+
+
+def test_verified_target_scope_rejects_other_hosts_ports_and_broader_paths(monkeypatch):
+    target = {
+        "target_id": "target-1",
+        "hostname": "example.com",
+        "ports": [443],
+        "scope_paths": ["/app"],
+    }
+    monkeypatch.setattr(main.database, "get_authorized_target", lambda target_id, owner_id, now: target)
+    from app.models import ScanRequest
+    allowed = ScanRequest(url="https://example.com/app/users", authorised=True, scope_paths=["/app/users"], target_id="target-1")
+    main._enforce_verified_target(allowed, "alice")
+
+    cases = [
+        ScanRequest(url="https://other.example.com/app", authorised=True, scope_paths=["/app"], target_id="target-1"),
+        ScanRequest(url="https://example.com:8443/app", authorised=True, scope_paths=["/app"], target_id="target-1"),
+        ScanRequest(url="https://example.com/app", authorised=True, scope_paths=["/"], target_id="target-1"),
+    ]
+    for payload in cases:
+        with pytest.raises(HTTPException) as error:
+            main._enforce_verified_target(payload, "alice")
+        assert error.value.status_code == 403
