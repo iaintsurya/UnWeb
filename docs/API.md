@@ -31,7 +31,7 @@ This is advisory matching, not a complete dependency audit or proof of safety. A
 ## Limits and deployment notes
 
 - Website scans: at most two concurrent scans per API process, 120-second scan deadline, 10 submissions/minute per direct peer IP.
-- Repository scans: one concurrent repository analysis per process, bounded upload/download size and 5 submissions/minute per direct peer IP.
+- Repository scans: one concurrent repository analysis per process. ZIP uploads are limited to 5 submissions/minute per direct peer IP; public GitHub source scans share a separate 5-submission/minute process-local bucket.
 - Advisory lookups: bounded in-process rate limit of 10 requests/minute per direct peer IP.
 - These are process-local abuse controls, not shared identity-aware rate limits. Reverse-proxy deployments must configure trusted proxy handling before relying on client IPs.
 - CORS origins are configured with `UNWEB_CORS_ORIGINS`; configure an explicit allowlist.
