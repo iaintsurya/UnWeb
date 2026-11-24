@@ -44,7 +44,7 @@ The gateway must:
 5. Preserve those gateway-generated headers when proxying to the frontend. The included Nginx configuration forwards them only on its internal API proxy request to FastAPI.
 6. Terminate public TLS and set the forwarded host/protocol headers correctly.
 
-The FastAPI service compares the shared secret in constant time and scopes saved scan history, details, audit events, target authorizations and rate-limit buckets to that authenticated identifier. In production, users must prove DNS control of each exact hostname before scanning it: the dashboard creates a one-time TXT challenge, the user publishes it at `_unweb-verification.<hostname>`, and the API verifies it. Verified grants are limited to selected ports and path prefixes and expire after 30 days. Do not publish port 8000, do not attach untrusted containers to the ingress network, and do not allow clients to connect directly to the API.
+The FastAPI service compares the shared secret in constant time and scopes saved scan history, details, repository report history, audit events, target authorizations and rate-limit buckets to that authenticated identifier. In production, users must prove DNS control of each exact hostname before scanning it: the dashboard creates a one-time TXT challenge, the user publishes it at `_unweb-verification.<hostname>`, and the API verifies it. Verified grants are limited to selected ports and path prefixes and expire after 30 days. Do not publish port 8000, do not attach untrusted containers to the ingress network, and do not allow clients to connect directly to the API.
 
 ## 3. Start the stack
 
@@ -70,9 +70,37 @@ The API and browser-worker service wait for Redis health and refuses production 
 
 ## 5. Backups and upgrades
 
-Back up the `unweb_data` and `redis_data` Docker volumes using your host's supported volume snapshot/backup process. For a consistent SQLite backup, stop the API container or use SQLite's online backup API from a trusted maintenance job. Test restores before upgrades. Do not copy a live SQLite database file without accounting for its WAL state.
+The API image includes a SQLite online-backup utility. The production Compose file mounts a host-side `./backups` directory at `/backups`; keep it outside version control and copy completed backups to a separate protected storage location.
 
-Update code only after CI passes, rebuild with Compose, and retain a known-good image and volume backup for rollback. Do not run multiple API replicas against the same SQLite volume.
+Create the host directory with permissions for the API's non-root UID:
+
+```bash
+sudo install -d -o 10001 -g 10001 -m 0700 backups
+```
+
+Create a consistent backup while the API and browser worker are running. SQLite's online backup API includes committed WAL data and the resulting file is created atomically with mode `0600`:
+
+```bash
+docker compose --env-file .env -f docker-compose.production.yml exec -T api \
+  python -m app.maintenance backup \
+  "/backups/unweb-$(date -u +%Y%m%dT%H%M%SZ).sqlite3"
+```
+
+The utility refuses to overwrite an existing backup unless `--overwrite` is supplied. It verifies the copied database with `PRAGMA integrity_check`.
+
+To restore, first stop every service that can write to SQLite. Then run the explicit restore command and restart the stack:
+
+```bash
+docker compose --env-file .env -f docker-compose.production.yml stop api browser-worker
+docker compose --env-file .env -f docker-compose.production.yml run --rm --no-deps api \
+  python -m app.maintenance restore /backups/your-backup.sqlite3 \
+  --overwrite --confirm-restore
+docker compose --env-file .env -f docker-compose.production.yml up -d api browser-worker frontend
+```
+
+Restore refuses to run without `--confirm-restore` and refuses to replace an existing database unless `--overwrite` is provided. Test restores in a separate environment before relying on them. Back up the `redis_data` volume separately if preserving queued browser-job dispatch state is required; SQLite report/job records remain in `unweb_data`.
+
+Update code only after CI passes, rebuild with Compose, and retain a known-good image and off-host volume backup for rollback. Do not run multiple API replicas against the same SQLite volume.
 
 ## 6. Verify the deployment
 
