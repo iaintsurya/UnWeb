@@ -76,7 +76,7 @@ async def require_trusted_identity(request: Request, call_next):
     """Trust identity only from a reverse proxy holding the configured shared secret."""
     if request.method == "OPTIONS":
         return await call_next(request)
-    if not request.url.path.startswith("/api/") or request.url.path.startswith("/api/health"):
+    if not request.url.path.startswith("/api/") or request.url.path in {"/api/health", "/api/health/ready"}:
         return await call_next(request)
 
     if not AUTH_PROXY_SECRET:
