@@ -581,3 +581,28 @@ def test_scan_result_records_verified_target_id(tmp_path, monkeypatch):
     assert created.json()["target_id"] == "verified-target-123"
     assert loaded.status_code == 200
     assert loaded.json()["target_id"] == "verified-target-123"
+
+
+def test_production_scan_api_requires_verified_target_before_scanning(tmp_path, monkeypatch):
+    class FakeRedis:
+        def ping(self):
+            return True
+        def eval(self, *args):
+            return 0
+
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "production-target-required.sqlite3")
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "x" * 64)
+    monkeypatch.setattr(main, "REDIS_CLIENT", FakeRedis())
+    async def unexpected_scan(*args, **kwargs):
+        raise AssertionError("scanner must not run without a verified target")
+    monkeypatch.setattr(main, "scan_site", unexpected_scan)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/scans",
+            json={"url": "https://example.com/", "authorised": True},
+            headers={"X-UnWeb-Auth-Token": "x" * 64, "X-UnWeb-Auth-User": "alice"},
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "verified_target_required"
