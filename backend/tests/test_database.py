@@ -67,3 +67,37 @@ def test_old_scan_results_are_pruned_to_the_retention_limit(tmp_path, monkeypatc
     history = database.list_scans(10)
     assert [item["id"] for item in history] == ["scan-2", "scan-1"]
     assert database.get_scan("scan-0") is None
+
+
+def test_scan_records_are_isolated_by_owner(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "owners.sqlite3")
+    database.initialize_database()
+    database.save_scan(sample_result("alice-scan"), owner_id="alice")
+    database.save_scan(sample_result("bob-scan"), owner_id="bob")
+
+    assert database.get_scan("alice-scan", "alice") is not None
+    assert database.get_scan("alice-scan", "bob") is None
+    assert [item["id"] for item in database.list_scans(owner_id="alice")] == ["alice-scan"]
+    assert [item["id"] for item in database.list_scans(owner_id="bob")] == ["bob-scan"]
+
+
+def test_existing_database_is_migrated_to_local_owner(tmp_path, monkeypatch):
+    import sqlite3
+    path = tmp_path / "legacy.sqlite3"
+    monkeypatch.setattr(database, "DB_PATH", path)
+    connection = sqlite3.connect(path)
+    connection.execute("""CREATE TABLE scans (
+        id TEXT PRIMARY KEY, requested_url TEXT NOT NULL, final_url TEXT NOT NULL,
+        title TEXT, status_code INTEGER NOT NULL, scanned_at TEXT NOT NULL, payload TEXT NOT NULL
+    )""")
+    legacy = sample_result("legacy-scan")
+    connection.execute(
+        "INSERT INTO scans VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (legacy.id, legacy.requested_url, legacy.final_url, legacy.title, legacy.status_code, legacy.scanned_at, legacy.model_dump_json()),
+    )
+    connection.commit()
+    connection.close()
+
+    database.initialize_database()
+    assert database.get_scan("legacy-scan", "local") is not None
+    assert database.get_scan("legacy-scan", "alice") is None
