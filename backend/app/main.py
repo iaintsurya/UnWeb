@@ -159,6 +159,7 @@ async def create_scan(payload: ScanRequest, request: Request):
             timeout=SCAN_TIMEOUT_SECONDS,
         )
         await asyncio.to_thread(database.save_scan, result, request.state.user_id)
+        await asyncio.to_thread(database.record_audit_event, request.state.user_id, "website_scan.completed", result.id)
         return result
     except asyncio.TimeoutError as exc:
         raise HTTPException(
@@ -304,6 +305,7 @@ async def create_repository_scan(request: Request):
         safe_name = Path(supplied_name.replace("\\", "/")).name
         repository_name = Path(safe_name).stem
         report.repository = repository_name[:100] or "repository"
+        await asyncio.to_thread(database.record_audit_event, request.state.user_id, "repository_zip_scan.completed", report.repository)
         return report.to_dict()
     finally:
         if temporary_path:
@@ -409,6 +411,7 @@ async def create_github_repository_scan(payload: GitHubRepositoryScanRequest, re
         report.repository = str(source["full_name"])
         result = report.to_dict()
         result["source"] = source
+        await asyncio.to_thread(database.record_audit_event, request.state.user_id, "github_repository_scan.completed", str(source["full_name"]))
         return result
     finally:
         if temporary_path:
@@ -441,11 +444,23 @@ async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Req
             headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
         )
     try:
-        return await query_advisories(payload.packages)
+        result = await query_advisories(payload.packages)
+        await asyncio.to_thread(
+            database.record_audit_event,
+            request.state.user_id,
+            "dependency_advisory_lookup.completed",
+            metadata={"package_count": len(payload.packages)},
+        )
+        return result
     except ValueError as exc:
         raise HTTPException(422, detail={"code": "invalid_dependency_batch", "message": str(exc)}) from exc
     except AdvisoryLookupError as exc:
         raise HTTPException(502, detail={"code": "advisory_provider_error", "message": str(exc)}) from exc
+
+
+@app.get("/api/audit-events")
+async def audit_events(request: Request, limit: int = Query(default=50, ge=1, le=100)):
+    return {"items": await asyncio.to_thread(database.list_audit_events, request.state.user_id, limit)}
 
 
 @app.get("/api/scans")
