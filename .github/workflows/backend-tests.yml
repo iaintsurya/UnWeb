@@ -64,3 +64,34 @@ jobs:
       - name: Verify non-root runtime and installed Chromium
         run: |
           docker run --rm --entrypoint python unweb-browser-worker:${{ github.sha }} -c "import os; from playwright.sync_api import sync_playwright; assert os.getuid() != 0; p = sync_playwright().start(); assert os.path.isfile(p.chromium.executable_path); p.stop()"
+
+  production-deployment:
+    name: Production images and compose smoke test
+    runs-on: ubuntu-latest
+    env:
+      UNWEB_AUTH_PROXY_SECRET: ci-only-not-a-production-secret
+      UNWEB_INGRESS_NETWORK: unweb-ci-ingress
+      UNWEB_EGRESS_NETWORK: unweb-ci-egress
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Create isolated compose networks
+        run: |
+          docker network create unweb-ci-ingress
+          docker network create unweb-ci-egress
+      - name: Validate production compose configuration
+        run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
+      - name: Build and start production stack
+        run: docker compose --env-file .env.production.example -f docker-compose.production.yml up -d --build
+      - name: Verify frontend, API health, and authentication boundary
+        run: |
+          docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/
+          docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).read(); import urllib.error; req=urllib.request.Request('http://127.0.0.1:8000/api/scans'); exec('try:\n urllib.request.urlopen(req, timeout=5)\n raise AssertionError(\'unauthenticated request unexpectedly succeeded\')\nexcept urllib.error.HTTPError as e:\n assert e.code == 401, e.code')"
+      - name: Show service health
+        if: always()
+        run: docker compose --env-file .env.production.example -f docker-compose.production.yml ps
+      - name: Stop production stack
+        if: always()
+        run: |
+          docker compose --env-file .env.production.example -f docker-compose.production.yml down -v
+          docker network rm unweb-ci-ingress unweb-ci-egress || true
