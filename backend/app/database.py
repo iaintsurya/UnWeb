@@ -75,6 +75,37 @@ def initialize_database() -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_audit_owner_time ON audit_events(owner_id, event_id DESC)"
         )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS target_challenges (
+                challenge_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                ports_json TEXT NOT NULL,
+                scope_paths_json TEXT NOT NULL,
+                token_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used_at TEXT
+            )"""
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_target_challenges_owner ON target_challenges(owner_id, created_at DESC)"
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS authorized_targets (
+                target_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                ports_json TEXT NOT NULL,
+                scope_paths_json TEXT NOT NULL,
+                verified_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT
+            )"""
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_authorized_targets_owner ON authorized_targets(owner_id, expires_at DESC)"
+        )
 
 
 def save_scan(result: ScanResult, owner_id: str = "local") -> None:
@@ -191,3 +222,133 @@ def list_audit_events(owner_id: str, limit: int = 50) -> list[dict[str, object]]
         }
         for row in rows
     ]
+
+
+def save_target_challenge(
+    challenge_id: str,
+    owner_id: str,
+    hostname: str,
+    ports: list[int],
+    scope_paths: list[str],
+    token_hash: str,
+    created_at: str,
+    expires_at: str,
+) -> None:
+    with _connection() as connection:
+        connection.execute(
+            """INSERT INTO target_challenges (
+                challenge_id, owner_id, hostname, ports_json, scope_paths_json,
+                token_hash, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (challenge_id, owner_id, hostname, json.dumps(ports), json.dumps(scope_paths), token_hash, created_at, expires_at),
+        )
+
+
+def get_target_challenge(challenge_id: str, owner_id: str) -> dict[str, object] | None:
+    with _connection() as connection:
+        row = connection.execute(
+            """SELECT challenge_id, hostname, ports_json, scope_paths_json, token_hash,
+            created_at, expires_at, used_at FROM target_challenges
+            WHERE challenge_id = ? AND owner_id = ?""",
+            (challenge_id, owner_id),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "challenge_id": row["challenge_id"],
+        "hostname": row["hostname"],
+        "ports": json.loads(row["ports_json"]),
+        "scope_paths": json.loads(row["scope_paths_json"]),
+        "token_hash": row["token_hash"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
+        "used_at": row["used_at"],
+    }
+
+
+def verify_target_challenge(
+    challenge_id: str,
+    owner_id: str,
+    token_hash: str,
+    verified_at: str,
+    target_expires_at: str,
+) -> dict[str, object] | None:
+    with _connection() as connection:
+        row = connection.execute(
+            """SELECT hostname, ports_json, scope_paths_json, token_hash, expires_at, used_at
+            FROM target_challenges WHERE challenge_id = ? AND owner_id = ?""",
+            (challenge_id, owner_id),
+        ).fetchone()
+        if row is None or row["used_at"] is not None or row["expires_at"] <= verified_at:
+            return None
+        if row["token_hash"] != token_hash:
+            return None
+        connection.execute(
+            "UPDATE target_challenges SET used_at = ? WHERE challenge_id = ? AND owner_id = ? AND used_at IS NULL",
+            (verified_at, challenge_id, owner_id),
+        )
+        connection.execute(
+            """INSERT INTO authorized_targets (
+                target_id, owner_id, hostname, ports_json, scope_paths_json, verified_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (challenge_id, owner_id, row["hostname"], row["ports_json"], row["scope_paths_json"], verified_at, target_expires_at),
+        )
+    return {
+        "target_id": challenge_id,
+        "hostname": row["hostname"],
+        "ports": json.loads(row["ports_json"]),
+        "scope_paths": json.loads(row["scope_paths_json"]),
+        "verified_at": verified_at,
+        "expires_at": target_expires_at,
+    }
+
+
+def get_authorized_target(target_id: str, owner_id: str, now: str) -> dict[str, object] | None:
+    with _connection() as connection:
+        row = connection.execute(
+            """SELECT target_id, hostname, ports_json, scope_paths_json, verified_at, expires_at
+            FROM authorized_targets WHERE target_id = ? AND owner_id = ?
+            AND revoked_at IS NULL AND expires_at > ?""",
+            (target_id, owner_id, now),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "target_id": row["target_id"],
+        "hostname": row["hostname"],
+        "ports": json.loads(row["ports_json"]),
+        "scope_paths": json.loads(row["scope_paths_json"]),
+        "verified_at": row["verified_at"],
+        "expires_at": row["expires_at"],
+    }
+
+
+def list_authorized_targets(owner_id: str, now: str) -> list[dict[str, object]]:
+    with _connection() as connection:
+        rows = connection.execute(
+            """SELECT target_id, hostname, ports_json, scope_paths_json, verified_at, expires_at
+            FROM authorized_targets WHERE owner_id = ? AND revoked_at IS NULL AND expires_at > ?
+            ORDER BY verified_at DESC""",
+            (owner_id, now),
+        ).fetchall()
+    return [
+        {
+            "target_id": row["target_id"],
+            "hostname": row["hostname"],
+            "ports": json.loads(row["ports_json"]),
+            "scope_paths": json.loads(row["scope_paths_json"]),
+            "verified_at": row["verified_at"],
+            "expires_at": row["expires_at"],
+        }
+        for row in rows
+    ]
+
+
+def revoke_authorized_target(target_id: str, owner_id: str, revoked_at: str) -> bool:
+    with _connection() as connection:
+        cursor = connection.execute(
+            """UPDATE authorized_targets SET revoked_at = ?
+            WHERE target_id = ? AND owner_id = ? AND revoked_at IS NULL""",
+            (revoked_at, target_id, owner_id),
+        )
+    return cursor.rowcount == 1
