@@ -153,8 +153,8 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
 
     hsts = h.get("strict-transport-security", "")
     if is_https and hsts:
-        max_age_values = re.findall(r"(?:^|;)\\s*max-age\\s*=\\s*([^;\\s]+)", hsts, flags=re.I)
-        if len(max_age_values) != 1 or not max_age_values[0].isdigit() or int(max_age_values[0]) == 0:
+        max_age_values = re.findall(r"(?:^|;)\s*max-age\s*=\s*([^;\s]+)", hsts, flags=re.I)
+        if len(max_age_values) != 1 or not max_age_values[0].isdigit() or max_age_values[0].lstrip("0") == "":
             findings.append(Finding(
                 id="ineffective-strict-transport-security",
                 title="Strict-Transport-Security has no effective max-age",
