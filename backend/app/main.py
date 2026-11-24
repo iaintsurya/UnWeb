@@ -17,6 +17,8 @@ from .scanner import scan_site, UnsupportedContentType
 from .url_policy import URLRejected
 from .repository_analysis import analyse_repository_archive, MAX_ARCHIVE_BYTES
 from .github_source import fetch_github_repository_archive, GitHubSourceError
+from .models import DependencyAdvisoryRequest
+from .dependency_advisories import query_advisories, AdvisoryLookupError
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -53,6 +55,7 @@ SCAN_TIMEOUT_SECONDS = 120
 REPOSITORY_SCAN_SEMAPHORE = asyncio.Semaphore(1)
 REPOSITORY_SCAN_LIMITER = SlidingWindowLimiter(max_requests=5, window_seconds=60)
 REPOSITORY_SCAN_QUEUE_TIMEOUT = 0.5
+ADVISORY_LOOKUP_LIMITER = SlidingWindowLimiter(max_requests=10, window_seconds=60)
 
 
 async def load_scan(scan_id: str) -> ScanResult:
@@ -369,6 +372,34 @@ async def create_github_repository_scan(payload: GitHubRepositoryScanRequest):
                 pass
         if acquired:
             REPOSITORY_SCAN_SEMAPHORE.release()
+
+
+@app.post("/api/dependency-advisories")
+async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Request):
+    """Look up advisories for exact, resolved dependency versions using OSV."""
+    if not payload.authorised:
+        raise HTTPException(
+            403,
+            detail={
+                "code": "dependency_advisory_authorisation_required",
+                "message": "Confirm that you are authorised to analyse these dependency records.",
+            },
+        )
+
+    client_key = request.client.host if request.client else "unknown"
+    retry_after = ADVISORY_LOOKUP_LIMITER.check(client_key)
+    if retry_after:
+        raise HTTPException(
+            429,
+            detail={"code": "dependency_advisory_rate_limited", "message": "Too many advisory lookups. Try again shortly."},
+            headers={"Retry-After": str(max(1, int(retry_after + 0.999)))},
+        )
+    try:
+        return await query_advisories(payload.packages)
+    except ValueError as exc:
+        raise HTTPException(422, detail={"code": "invalid_dependency_batch", "message": str(exc)}) from exc
+    except AdvisoryLookupError as exc:
+        raise HTTPException(502, detail={"code": "advisory_provider_error", "message": str(exc)}) from exc
 
 
 @app.get("/api/scans")
