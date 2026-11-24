@@ -145,33 +145,32 @@ def test_repository_scan_api_returns_redacted_report_and_persists_owner_scoped_h
             content=make_repository_zip(),
             headers=repository_headers(**identity),
         )
+        assert response.status_code == 200
+        report = response.json()
+        assert report["repository"] == "sample-project"
+        assert report["files_scanned"] == 3
+        assert any(item["source"] == "repository" for item in report["security_findings"])
+        assert any(item["path"] == "/api/health" for item in report["route_inventory"])
+        assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
+        assert any(item["name"] == "express" for item in report["dependency_inventory"])
+        assert any(item["method"] == "GET" and item["path"] == "/api/health" for item in report["route_inventory"])
+        assert "repository-secret-value-123" not in response.text
+        assert report["report_id"]
+        assert report["scanned_at"]
 
-    assert response.status_code == 200
-    report = response.json()
-    assert report["repository"] == "sample-project"
-    assert report["files_scanned"] == 3
-    assert any(item["source"] == "repository" for item in report["security_findings"])
-    assert any(item["path"] == "/api/health" for item in report["route_inventory"])
-    assert any(item["id"] == "python-dynamic-evaluation" for item in report["findings"])
-    assert any(item["name"] == "express" for item in report["dependency_inventory"])
-    assert any(item["method"] == "GET" and item["path"] == "/api/health" for item in report["route_inventory"])
-    assert "repository-secret-value-123" not in response.text
-    assert report["report_id"]
-    assert report["scanned_at"]
+        history = client.get("/api/repository-reports?limit=10", headers=identity)
+        assert history.status_code == 200
+        assert history.json()["items"][0]["report_id"] == report["report_id"]
+        assert history.json()["items"][0]["finding_count"] == len(report["findings"])
 
-    history = client.get("/api/repository-reports?limit=10", headers=identity)
-    assert history.status_code == 200
-    assert history.json()["items"][0]["report_id"] == report["report_id"]
-    assert history.json()["items"][0]["finding_count"] == len(report["findings"])
+        detail = client.get(f"/api/repository-reports/{report['report_id']}", headers=identity)
+        assert detail.status_code == 200
+        assert detail.json()["repository"] == "sample-project"
+        assert "repository-secret-value-123" not in detail.text
 
-    detail = client.get(f"/api/repository-reports/{report['report_id']}", headers=identity)
-    assert detail.status_code == 200
-    assert detail.json()["repository"] == "sample-project"
-    assert "repository-secret-value-123" not in detail.text
-
-    other_user = {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": "bob"}
-    forbidden_detail = client.get(f"/api/repository-reports/{report['report_id']}", headers=other_user)
-    assert forbidden_detail.status_code == 404
+        other_user = {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": "bob"}
+        forbidden_detail = client.get(f"/api/repository-reports/{report['report_id']}", headers=other_user)
+        assert forbidden_detail.status_code == 404
 
 
 def test_repository_scan_api_requires_explicit_authorisation():
