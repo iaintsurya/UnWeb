@@ -402,3 +402,19 @@ def test_scan_history_and_detail_are_isolated_by_authenticated_user(tmp_path, mo
     assert len(alice_history.json()["items"]) == 1
     assert bob_history.json()["items"] == []
     assert bob_detail.status_code == 404
+
+
+def test_auth_gateway_allows_cors_preflight_without_identity(monkeypatch):
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    with TestClient(main.app) as client:
+        response = client.options(
+            "/api/scans",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-unweb-auth-token,x-unweb-auth-user",
+            },
+        )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
