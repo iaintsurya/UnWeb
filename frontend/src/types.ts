@@ -17,3 +17,7 @@ export type RepositoryReport={repository:string;scanner_version:string;findings:
 
 
 export type AdvisoryReport={provider:string;packages_checked:number;packages_with_advisories:number;advisory_matches:number;results:{package:string;ecosystem:string;version:string;advisory_count:number;truncated:boolean;advisories:{id:string;summary:string;aliases:string[];modified:string|null;published:string|null;references:string[]}[]}[];limitations:string[]};
+
+
+export type AuthorizedTarget={target_id:string;hostname:string;ports:number[];scope_paths:string[];verified_at:string;expires_at:string};
+export type TargetChallenge={challenge_id:string;hostname:string;record_name:string;record_type:"TXT";record_value:string;ports:number[];scope_paths:string[];expires_at:string;instructions:string};
