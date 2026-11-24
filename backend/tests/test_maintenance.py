@@ -31,13 +31,25 @@ def test_online_backup_includes_committed_wal_data_and_is_private(tmp_path, monk
     destination = tmp_path / "backups" / "snapshot.sqlite3"
     _seed_database(source, monkeypatch)
 
-    created = backup_database(source, destination)
+    # Keep a WAL-mode connection open while the backup runs so the row is
+    # still in the WAL rather than being checkpointed on last-connection close.
+    wal_connection = sqlite3.connect(source)
+    try:
+        assert wal_connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        wal_connection.execute("CREATE TABLE wal_probe (value TEXT NOT NULL)")
+        wal_connection.execute("INSERT INTO wal_probe VALUES (?)", ("committed-in-wal",))
+        wal_connection.commit()
+
+        created = backup_database(source, destination)
+    finally:
+        wal_connection.close()
 
     assert created == destination.resolve()
     assert destination.stat().st_mode & 0o777 == 0o600
     with sqlite3.connect(destination) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert connection.execute("SELECT COUNT(*) FROM scans").fetchone()[0] == 1
+        assert connection.execute("SELECT value FROM wal_probe").fetchone()[0] == "committed-in-wal"
 
 
 def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path, monkeypatch):
