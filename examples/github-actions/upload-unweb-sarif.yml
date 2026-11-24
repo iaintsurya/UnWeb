@@ -1,0 +1,49 @@
+name: Upload UnWeb SARIF
+
+on:
+  workflow_dispatch:
+    inputs:
+      sarif_file:
+        description: "Repository-relative path to the exported UnWeb SARIF file"
+        required: true
+        default: "unweb.sarif"
+        type: string
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate SARIF input
+        env:
+          SARIF_FILE: ${{ inputs.sarif_file }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["SARIF_FILE"])
+          if path.is_absolute() or ".." in path.parts or not path.is_file():
+              raise SystemExit("SARIF_FILE must be an existing repository-relative file without '..' path segments.")
+
+          try:
+              data = json.loads(path.read_text(encoding="utf-8"))
+          except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+              raise SystemExit(f"Could not read valid SARIF JSON: {exc}") from exc
+
+          if data.get("version") != "2.1.0" or not isinstance(data.get("runs"), list):
+              raise SystemExit("Expected a SARIF 2.1.0 document with a runs array.")
+          PY
+
+      - name: Upload UnWeb findings to GitHub code scanning
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ inputs.sarif_file }}
+          category: unweb-repository-assessment

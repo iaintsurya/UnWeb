@@ -1,6 +1,29 @@
 {
-  "name":"unweb-frontend","private":true,"version":"0.1.0","type":"module",
-  "scripts":{"dev":"vite --host 127.0.0.1","build":"tsc -b && vite build","test":"vitest run"},
-  "dependencies":{"@vitejs/plugin-react":"latest","vite":"latest","typescript":"latest","react":"latest","react-dom":"latest","lucide-react":"latest"},
-  "devDependencies":{"@types/react":"latest","@types/react-dom":"latest","vitest":"latest","jsdom":"latest"}
+  "name": "unweb-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.1.2",
+    "vite": "8.3.5",
+    "typescript": "7.0.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "lucide-react": "1.63.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "vitest": "5.0.5",
+    "jsdom": "30.1.3"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
 }

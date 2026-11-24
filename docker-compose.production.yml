@@ -1,0 +1,140 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    user: "999:999"
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      UNWEB_ENV: production
+      UNWEB_AUTH_PROXY_SECRET: ${UNWEB_AUTH_PROXY_SECRET:?Set UNWEB_AUTH_PROXY_SECRET in the deployment environment}
+      UNWEB_REDIS_URL: redis://redis:6379/0
+      UNWEB_DB_PATH: /data/unweb.sqlite3
+      UNWEB_CORS_ORIGINS: ${UNWEB_CORS_ORIGINS:-}
+    volumes:
+      - unweb_data:/data
+      - ./backups:/backups
+    networks:
+      - ingress
+      - egress
+      - data
+    expose:
+      - "8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).read()"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1536m
+    cpus: 1.5
+    pids_limit: 128
+
+  browser-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser-worker
+    command: ["--worker"]
+    environment:
+      UNWEB_ENV: production
+      UNWEB_REDIS_URL: redis://redis:6379/0
+      UNWEB_DB_PATH: /data/unweb.sqlite3
+    volumes:
+      - unweb_data:/data
+    networks:
+      - egress
+      - data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from redis import Redis; import os; r=Redis.from_url(os.environ['UNWEB_REDIS_URL'], socket_connect_timeout=2, socket_timeout=2); assert r.get('unweb:browser-worker:heartbeat') and r.ttl('unweb:browser-worker:heartbeat') > 0"
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1536m
+    cpus: 1.5
+    pids_limit: 128
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    networks:
+      - ingress
+    expose:
+      - "8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/run:rw,noexec,nosuid,size=8m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+
+volumes:
+  unweb_data:
+  redis_data:
+
+networks:
+  ingress:
+    external: true
+    name: ${UNWEB_INGRESS_NETWORK:-unweb-ingress}
+  egress:
+    external: true
+    name: ${UNWEB_EGRESS_NETWORK:-unweb-egress}
+  data:
+    internal: true

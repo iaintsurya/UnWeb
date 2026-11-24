@@ -1,8 +1,143 @@
 # Architecture
-Current pipeline: URL normalisation -> DNS address validation -> bounded HTTP fetch -> HTML parsing -> fingerprinting -> JS lexical clues -> passive header checks -> optional reconstruction -> JSON response.
 
-Production pipeline should use authenticated API, durable jobs, isolated workers, egress-enforcing proxy/firewall, persistent evidence store and real progress events. Application-level DNS checks alone cannot fully eliminate DNS rebinding/TOCTOU risk. Public deployment requires network-level egress controls, unprivileged disposable browser containers, CPU/memory/wall-clock limits, rate limiting, audit logs and security review.
+## Product purpose
 
-v0.1: safe URL intake, bounded fetch, metadata/assets/fingerprints.
-v1.0: bounded crawler, JS inventory, passive security, exports and broader tests.
-v2.0: isolated Playwright network capture, DOM/style inspector, better reconstruction, job queue, WebSockets, durable DB, CLI and CI mode.
+UnWeb is an authorised web application security assessment platform. Its main job is to help defenders discover exposed attack surface, identify likely vulnerabilities, validate suspected issues safely, explain impact, and support remediation and retesting.
+
+The current code is an engineering foundation, not a complete vulnerability scanner. Existing passive observations and browser metadata are evidence inputs; they must not be presented as proof of exploitability.
+
+## Intended assessment lifecycle
+
+```text
+Explicit authorisation and target scope
+  -> scope validation (hostnames, schemes, ports, paths, time window, budgets)
+  -> passive attack-surface discovery
+  -> pages, routes, scripts, APIs, assets, technologies, headers and cookies
+  -> passive security checks
+  -> optional isolated browser evidence collection
+  -> bounded low-impact active checks
+  -> controlled non-destructive validation (only when explicitly approved)
+  -> evidence-backed findings and confidence
+  -> risk and impact explanation
+  -> remediation guidance
+  -> safe retest and closure evidence
+```
+
+Every stage must inherit the same scope and budget. Redirects, discovered hosts, API calls, browser requests, and any follow-up check must be re-authorised against that scope. The system must stop rather than expand scope automatically.
+
+## Current implementation
+
+The current API:
+- normalises HTTP(S) URLs and validates public DNS destinations;
+- connects to validated IP literals while preserving HTTP Host and TLS identity;
+- follows bounded same-origin HTML links and records only observed page edges;
+- extracts metadata, assets, technologies and bounded JavaScript route/framework/source-map clues;
+- records passive response-header observations;
+- saves scan results in single-instance SQLite;
+- applies in-process concurrency, timeout and rate limits.
+
+The current scanner is primarily a discovery and passive evidence collector. It does not yet run a comprehensive vulnerability test suite, validate exploit chains, test logged-in authorization boundaries, or establish that a target is vulnerable. A missing security header is a configuration observation whose risk depends on application context, not automatically a critical vulnerability.
+
+## Optional browser worker
+
+The Playwright engine is a separate CLI path, not an API dependency:
+
+```text
+Operator launches one disposable, non-root worker
+  -> HTTPS target URL normalisation and public DNS validation
+  -> loopback-only CONNECT proxy starts
+  -> Chromium launches with its sandbox enabled and proxy configured
+  -> fresh non-persistent context (downloads off, service workers blocked)
+  -> context route guard permits only the target HTTPS origin
+  -> CONNECT proxy revalidates DNS and opens a socket to a validated IP literal
+  -> one DOM-ready render (request/time budgets)
+  -> bounded DOM/style and network metadata report (query strings omitted)
+  -> browser, context, proxy and process exit
+```
+
+This is runtime observation. It does not submit test inputs or prove vulnerability. Any later browser-assisted active test must use the explicit scope engine, request budgets, non-destructive payload policy, and worker isolation described above.
+
+The proxy denies non-CONNECT traffic and any host/port other than the initial target origin. Every allowed CONNECT resolves the hostname again, rejects the entire answer set if any address is non-public, and connects to a validated IP literal rather than allowing the browser to perform the destination DNS lookup. Redirects therefore have to pass through the same proxy before the browser can open the next TLS tunnel. Browser route interception is an additional application-level control, not the security boundary.
+
+**Mandatory external controls:** run the image as a non-root user in a disposable container with Chromium sandboxing available; apply a per-job default-deny egress policy that allows only the validated public target IP address(es) on the target HTTPS port and DNS only through a resolver restricted to the target hostname; deny loopback, private, link-local, multicast, IPv6 ULA, cloud metadata, and all other destinations; and enforce CPU, memory, process, and wall-clock limits. A standard Docker bridge network is not enough. The CLI acknowledgement flag does not inspect or enforce those controls. Since response byte counts are based on declared Content-Length headers, they are not a hard transfer cap.
+
+Cross-origin subresources are blocked, so pages that depend on third-party CSS, fonts, images, or scripts may render incompletely. The worker currently handles one unauthenticated HTTPS page per job. It does not click links, submit forms, use a saved browser profile, or perform active vulnerability validation. API-managed jobs are owner-scoped in SQLite, dispatched through a Redis Streams consumer group, revalidated against the owner's current DNS-verified target grant immediately before execution, and stored with bounded evidence. The API exposes job creation/status/cancellation endpoints and a worker-heartbeat health endpoint. The production Compose stack mounts the same persistent SQLite volume into the API and one browser worker; do not scale either service against this single-instance SQLite deployment. The worker remains dependent on externally enforced default-deny egress controls.
+
+## Local repository analysis prototype
+
+The repository analyser is a separate local CLI path:
+
+```text
+Operator selects an authorised local checkout
+  -> resolve and validate a directory or validate a bounded ZIP archive
+  -> for ZIP input, reject traversal/absolute paths, symlinks, duplicate paths and oversized entries; extract candidate files into a temporary directory
+  -> enumerate supported source/config files without following symlinks
+  -> skip generated, dependency, and VCS directories
+  -> enforce file-count, per-file, total-byte, and finding budgets
+  -> run Python AST checks and cross-language/configuration lexical checks
+  -> parse supported dependency manifests/lockfiles into an inventory
+  -> redact credential-shaped evidence
+  -> emit JSON with suspected status and explicit limitations
+```
+
+The local CLI supports local directories and bounded user-provided ZIP archives. The FastAPI application also exposes a first public-GitHub source integration: an operator supplies a canonical `https://github.com/{owner}/{repo}` URL, an optional branch/tag, and an explicit authorisation acknowledgement. UnWeb resolves the selected ref to a 40-character commit SHA before requesting the ZIP archive from GitHub; it disables environment proxy inheritance, does not follow arbitrary redirects, accepts the archive redirect only on `codeload.github.com` for the selected repository path, streams at most 50 MB to a temporary file, analyses it without executing code or installing dependencies, and deletes the archive. Private repositories, GitHub OAuth/App installation, PATs, remote clone, and advisory lookup are not implemented. GitHub source access is the only networked part of this repository-analysis path; the local CLI remains offline. Python AST checks cover selected dangerous-call patterns; selected manifest/lockfile parsers inventory dependency declarations and resolved versions without querying advisories. There is no control-flow, data-flow, inter-file reachability, or package vulnerability analysis. Reports include the immutable commit identity so a later retest can compare exact source revisions.
+
+## Finding and evidence model (planned)
+
+A finding should be a structured record, not just a label or a scary severity badge. The planned record includes:
+- stable check identifier and category;
+- affected URL, method, parameter or component;
+- observed evidence and source location;
+- validation level (passive, low-impact active, controlled proof, or inconclusive);
+- confidence and severity, kept separate;
+- preconditions and potential impact;
+- concise reproduction steps that remain within the approved scope;
+- remediation recommendation and retest procedure;
+- timestamps, scanner version, scope identifier and request-budget accounting.
+
+A suspected issue that has not been safely verified must be labelled as suspected or inconclusive. Do not claim a successful exploit merely because a payload was sent or an unusual response appeared. Avoid storing credentials, session cookies, full personal data, or response bodies unless a specific approved test requires a minimal redacted evidence sample.
+
+## Planned security coverage
+
+The check catalogue will be based on the OWASP Web Security Testing Guide, OWASP Top 10 and OWASP API Security Top 10. Priorities include access control, authentication/session handling, security misconfiguration, injection indicators, unsafe input/output handling, sensitive data exposure, API authorization, unrestricted resource use, SSRF indicators, unsafe API consumption, and error handling.
+
+Coverage must be explicit. A scanner result should say which checks ran, which were skipped, why they were skipped, and what the tool cannot determine. The presence of a category in the roadmap does not mean it is currently implemented.
+
+## Safety and execution boundaries
+
+- Require explicit authorisation and a declared scope before any active test.
+- Default to passive mode. Active checks require a selected profile and explicit operator confirmation.
+- Enforce host, port, path, redirect, request-count, concurrency, time, and response-size budgets outside the browser process as well as inside it.
+- Use benign markers and owner-provided test data/accounts for verification.
+- Never automatically perform destructive writes, denial-of-service tests, credential attacks, persistence, stealth/evasion, broad data extraction, or attempts to access cloud metadata/internal services.
+- Keep browser and active-test workers isolated, unprivileged, disposable, and subject to external egress policy.
+- Preserve concise redacted evidence and an audit trail; do not collect sensitive information just because it is technically accessible.
+- Treat all automated findings as assessment evidence requiring context, not as an infallible security verdict.
+
+## Persistence
+
+The preview uses the Python standard library's SQLite driver. Scan payloads, owner-scoped browser job state/results, target authorizations and audit events are stored in SQLite; Redis Streams provides durable browser-job dispatch and Redis also provides shared rate limits. The production Compose baseline mounts a persistent SQLite volume into one API and one browser worker. This is a single-instance deployment, not a horizontally scalable database architecture. The path is configurable through `UNWEB_DB_PATH`.
+
+Before multi-user or enterprise use, storage must evolve to support authenticated ownership, job state, immutable audit records, evidence retention/redaction policies, and safe multi-instance concurrency.
+
+## Roadmap
+
+- **Foundation (current):** bounded crawler, observed page graph, SQLite scan history, JavaScript clues, passive security-header/cookie observations with cookie-value redaction, local read-only repository-analysis CLI (Python AST plus cross-language lexical checks), optional isolated browser-worker prototype, tests and CI.
+- **Security assessment MVP:** scope/consent model, target inventory, authenticated GitHub repository selection and bounded ingestion, common structured findings/evidence, documented passive checks, explicitly enabled low-impact checks, reports and retesting.
+- **Correlation and validation engine:** correlate live website/API routes and browser evidence with repository handlers and authorization logic; add stronger language-aware/data-flow and dependency analysis; use owner-provided test identities, safe input-validation checks, risk ranking, and remediation workflows.
+- **Production hardening:** authentication, shared rate limits, durable worker queue, external network policy enforcement, audit retention, role separation and independent security review.
+## Common finding and evidence contract
+
+`backend/app/finding_schema.py` adapts website and repository findings into a common `security_findings` contract without removing the legacy source-specific `findings` arrays. IDs are deterministic for the same source, check, target, and location, so a finding can be correlated across repeat scans while evidence and severity evolve. The record keeps severity separate from confidence and carries a controlled validation state. Website checks report observed response facts; local source patterns remain suspected until separately validated. Location is represented as a URL for website findings or a repository path and optional line number for code findings. Impact and preconditions remain unset when the scanner has not established them.
+## Static repository route inventory
+
+The repository analyser extracts literal route declarations without executing source. Python decorators use the standard-library AST. JavaScript/TypeScript route calls are lexical and ignore comments and matches starting inside string literals. Go handler calls, Spring mapping annotations, PHP route calls and Ruby route declarations are conservative lexical patterns. Records include method, path, source file, line and syntax hint. Dynamic route construction, route registration by imported modules, middleware ordering, router composition and runtime deployment are not resolved. A 2,000-record cap is reported as truncation. This inventory is a prerequisite for later website/repository path correlation, not a vulnerability finding.
+## Website-to-repository route correlation
+
+`frontend/src/lib/correlation.ts` compares the website scan's fetched page paths (GET observations) and JavaScript route-reference clues with the repository report's static route inventory. The comparison normalises URL paths, strips queries/fragments and trailing slashes, supports common one-segment parameter syntaxes, and excludes conflicts when both HTTP methods are known. It reports exact/parameterised overlap, source locations, unmatched lists and truncation. Confidence is deliberately capped at medium for exact path+method overlap and low for parameterised or unknown-method overlap because the scan target and repository snapshot may not be the same deployed version. The feature does not infer reachability, authorisation, authentication, or exploitability, and unmatched records are not evidence of absence.
+## Website scan authorisation acknowledgement
+
+`ScanRequest.authorised` defaults to false and `POST /api/scans` rejects a request without an explicit true value before consuming scan capacity. The dashboard requires the operator to check the corresponding ownership/permission acknowledgement. This is not identity authentication or proof of ownership: an arbitrary API client can assert the boolean. A production service still needs authenticated operator identity, verified target ownership/permission, durable scope records (approved host/port/path/window), audit trails and enforced network policy. Current website crawling remains same-origin and bounded by page count, request size, concurrency, timeout and rate controls.
+## Python dynamic SQL heuristic
+
+The Python AST pass checks the first argument to `execute`, `executemany` and `executescript` for f-string interpolation, string `+`/`%` construction, or `.format()` calls. It deliberately avoids flagging a literal query passed separately from its bind parameters. It is a local syntactic indicator only: no taint tracking, variable propagation, interprocedural analysis, or runtime validation is performed, and findings remain suspected rather than confirmed SQL injection.

@@ -17,3 +17,153 @@ def test_js_heuristics():
     assert "/api/products" in result["routes"]
     assert result["source_mapping_url_reference"]
     assert "heuristics" in result["limitations"]
+
+
+
+def test_hsts_and_framing_checks_are_context_aware():
+    https_findings = analyze_security(
+        {"content-security-policy": "default-src 'self'; frame-ancestors 'none'"},
+        "https://example.com/",
+    )
+    https_ids = {finding.id for finding in https_findings}
+    assert "missing-strict-transport-security" in https_ids
+    assert "missing-framing-protection" not in https_ids
+
+    protected_findings = analyze_security(
+        {
+            "strict-transport-security": "max-age=31536000",
+            "x-frame-options": "DENY",
+        },
+        "https://example.com/",
+    )
+    protected_ids = {finding.id for finding in protected_findings}
+    assert "missing-strict-transport-security" not in protected_ids
+    assert "missing-framing-protection" not in protected_ids
+
+
+
+def test_cookie_attribute_observations_never_include_cookie_values():
+    secret = "sessionid=super-secret-session-value; Path=/; SameSite=None"
+    findings = analyze_security(
+        {"set-cookie": secret, "content-type": "text/html"},
+        "https://example.com/",
+    )
+    by_id = {finding.id: finding for finding in findings}
+    assert "cookie-sessionid-missing-secure" in by_id
+    assert "cookie-sessionid-missing-httponly" in by_id
+    assert "cookie-sessionid-samesite-none-without-secure" in by_id
+    rendered = " ".join(
+        [finding.title + " " + finding.evidence + " " + finding.recommendation
+         for finding in findings]
+    )
+    assert "super-secret-session-value" not in rendered
+    assert "sessionid" in rendered
+
+
+def test_cookie_attribute_parser_handles_multiple_set_cookie_lines():
+    findings = analyze_security(
+        {
+            "__unweb_set_cookie_headers": (
+                "theme=dark; Path=/; Secure; HttpOnly; SameSite=Lax\n"
+                "sid=hidden-value; Path=/"
+            )
+        },
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert not any(item.startswith("cookie-theme-") for item in ids)
+    assert "cookie-sid-missing-secure" in ids
+    assert "cookie-sid-missing-httponly" in ids
+    assert "cookie-sid-missing-samesite" in ids
+
+
+
+def test_cookie_header_lookup_is_case_insensitive():
+    findings = analyze_security(
+        {"Set-Cookie": "sid=redacted; Path=/"},
+        "https://example.com/",
+    )
+    assert any(item.id == "cookie-sid-missing-secure" for item in findings)
+
+
+
+def test_present_but_ineffective_security_headers_are_reported():
+    findings = analyze_security(
+        {
+            "x-content-type-options": "nosniff, nosniff",
+            "strict-transport-security": "includeSubDomains; max-age=0",
+            "content-security-policy": "   ",
+        },
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert "invalid-x-content-type-options" in ids
+    assert "ineffective-strict-transport-security" in ids
+    assert "empty-content-security-policy" in ids
+
+
+def test_effective_hsts_and_nosniff_do_not_trigger_weak_value_findings():
+    findings = analyze_security(
+        {
+            "x-content-type-options": "nosniff",
+            "strict-transport-security": "max-age=31536000; includeSubDomains",
+            "content-security-policy": "default-src 'self'; frame-ancestors 'none'",
+        },
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert "invalid-x-content-type-options" not in ids
+    assert "ineffective-strict-transport-security" not in ids
+    assert "empty-content-security-policy" not in ids
+
+
+
+def test_passive_cors_and_technology_header_observations_are_cautious():
+    findings = analyze_security(
+        {
+            "access-control-allow-origin": "*",
+            "server": "example-httpd/2.4.58",
+            "x-powered-by": "ExampleRuntime",
+        },
+        "https://example.com/",
+    )
+    by_id = {finding.id: finding for finding in findings}
+    assert by_id["cors-wildcard-origin"].severity == "low"
+    assert "does not by itself demonstrate" in by_id["cors-wildcard-origin"].evidence
+    assert by_id["server-version-disclosure"].severity == "info"
+    assert "2.4.58" not in by_id["server-version-disclosure"].evidence
+    assert by_id["technology-header-disclosure"].severity == "info"
+    assert "ExampleRuntime" not in by_id["technology-header-disclosure"].evidence
+
+
+def test_permissive_csp_script_sources_are_reported_without_claiming_exploitability():
+    findings = analyze_security(
+        {"content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'"},
+        "https://example.com/",
+    )
+    by_id = {finding.id: finding for finding in findings}
+    assert by_id["csp-permissive-script-source"].severity == "low"
+    assert "depends on the complete policy" in by_id["csp-permissive-script-source"].evidence
+
+
+def test_public_cors_without_credentials_is_not_mislabeled_as_credentialed_access():
+    findings = analyze_security(
+        {
+            "access-control-allow-origin": "*",
+            "access-control-allow-credentials": "true",
+        },
+        "https://example.com/",
+    )
+    cors = next(item for item in findings if item.id == "cors-wildcard-origin")
+    assert "does not by itself demonstrate access to private or credentialed data" in cors.evidence
+    assert not any(item.id == "cors-credential-theft" for item in findings)
+
+
+def test_version_disclosure_requires_a_version_like_header_value():
+    findings = analyze_security(
+        {"server": "ExampleServer", "x-powered-by": ""},
+        "https://example.com/",
+    )
+    ids = {finding.id for finding in findings}
+    assert "server-version-disclosure" not in ids
+    assert "technology-header-disclosure" not in ids
