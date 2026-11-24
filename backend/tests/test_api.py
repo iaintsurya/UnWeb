@@ -393,7 +393,7 @@ def test_auth_proxy_rejects_missing_or_invalid_identity(monkeypatch):
 def test_scan_history_and_detail_are_isolated_by_authenticated_user(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "ownership.sqlite3")
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
-    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
     async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
         return make_result()
     monkeypatch.setattr(main, "scan_site", fake_scan_site)
@@ -411,7 +411,7 @@ def test_scan_history_and_detail_are_isolated_by_authenticated_user(tmp_path, mo
 
 def test_auth_gateway_allows_cors_preflight_without_identity(monkeypatch):
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
-    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
     with TestClient(main.app) as client:
         response = client.options(
             "/api/scans",
@@ -428,7 +428,7 @@ def test_auth_gateway_allows_cors_preflight_without_identity(monkeypatch):
 def test_scan_rate_limit_is_scoped_to_authenticated_user(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "user-limits.sqlite3")
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
-    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
     monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(1, 60))
 
     async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
@@ -470,7 +470,7 @@ def test_scan_api_fails_closed_when_shared_rate_limit_store_is_unavailable(monke
 
 
 def test_production_startup_requires_authentication_secret(monkeypatch):
-    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "")
     monkeypatch.setattr(main, "REDIS_CLIENT", None)
     with pytest.raises(RuntimeError, match="UNWEB_AUTH_PROXY_SECRET"):
@@ -479,7 +479,7 @@ def test_production_startup_requires_authentication_secret(monkeypatch):
 
 
 def test_production_startup_requires_shared_redis(monkeypatch):
-    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "configured-secret")
     monkeypatch.setattr(main, "REDIS_CLIENT", None)
     with pytest.raises(RuntimeError, match="UNWEB_REDIS_URL"):
