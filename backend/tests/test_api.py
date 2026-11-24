@@ -296,3 +296,30 @@ def test_dependency_advisory_api_rejects_invalid_package_versions():
         )
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "invalid_dependency_batch"
+
+
+def test_dependency_advisory_api_returns_provider_results(monkeypatch):
+    async def fake_query(packages):
+        assert packages == [{"name": "requests", "ecosystem": "PyPI", "version": "2.31.0"}]
+        return {
+            "provider": "OSV",
+            "packages_checked": 1,
+            "packages_with_advisories": 1,
+            "advisory_matches": 1,
+            "results": [{"package": "requests", "ecosystem": "PyPI", "version": "2.31.0", "advisory_count": 1, "advisories": [{"id": "GHSA-test"}]}],
+            "limitations": [],
+        }
+
+    monkeypatch.setattr(main, "query_advisories", fake_query)
+    monkeypatch.setattr(main, "ADVISORY_LOOKUP_LIMITER", SlidingWindowLimiter(10, 60))
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/dependency-advisories",
+            json={
+                "authorised": True,
+                "packages": [{"name": "requests", "ecosystem": "PyPI", "version": "2.31.0"}],
+            },
+        )
+    assert response.status_code == 200
+    assert response.json()["provider"] == "OSV"
+    assert response.json()["advisory_matches"] == 1
