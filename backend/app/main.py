@@ -646,7 +646,10 @@ async def verify_target_challenge(challenge_id: str, request: Request):
     if not matched:
         raise HTTPException(422, detail={"code": "target_dns_proof_missing", "message": f"The expected TXT value was not found at _unweb-verification.{challenge['hostname']}. Wait for DNS propagation and try again."})
     expires_at = (now + TARGET_AUTHORIZATION_TTL).isoformat()
-    target = await asyncio.to_thread(database.verify_target_challenge, challenge_id, request.state.user_id, challenge["token_hash"], now.isoformat(), expires_at)
+    try:
+        target = await asyncio.to_thread(database.verify_target_challenge, challenge_id, request.state.user_id, challenge["token_hash"], now.isoformat(), expires_at)
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": "target_authorization_limit_reached", "message": str(exc)}) from exc
     if target is None:
         raise HTTPException(409, detail={"code": "target_challenge_already_used", "message": "This verification challenge is no longer valid."})
     await asyncio.to_thread(database.record_audit_event, request.state.user_id, "target_authorization.verified", target["target_id"], {"hostname": target["hostname"], "ports": target["ports"], "scope_paths": target["scope_paths"]})
