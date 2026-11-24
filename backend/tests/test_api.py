@@ -39,7 +39,7 @@ def test_scan_api_persists_result_and_lists_history(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "api-test.sqlite3")
     monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(10, 60))
 
-    async def fake_scan_site(url, max_pages, include_reconstruction):
+    async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
         return make_result()
 
     monkeypatch.setattr(main, "scan_site", fake_scan_site)
@@ -79,7 +79,7 @@ def test_scan_api_returns_retry_after_when_rate_limited(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "limited.sqlite3")
     monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(1, 60))
 
-    async def fake_scan_site(url, max_pages, include_reconstruction):
+    async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
         return make_result()
 
     monkeypatch.setattr(main, "scan_site", fake_scan_site)
@@ -323,3 +323,44 @@ def test_dependency_advisory_api_returns_provider_results(monkeypatch):
     assert response.status_code == 200
     assert response.json()["provider"] == "OSV"
     assert response.json()["advisory_matches"] == 1
+
+
+def test_scan_api_passes_explicit_path_scope_to_scanner(monkeypatch, tmp_path):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "scoped.sqlite3")
+    monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(10, 60))
+    observed = {}
+
+    async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
+        observed["scope_paths"] = scope_paths
+        result = make_result()
+        result.scope_paths = scope_paths or ["/"]
+        return result
+
+    monkeypatch.setattr(main, "scan_site", fake_scan_site)
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/scans",
+            json={
+                "url": "https://example.com/app",
+                "max_pages": 4,
+                "authorised": True,
+                "scope_paths": ["/app", "/api/v1"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert observed["scope_paths"] == ["/app", "/api/v1"]
+    assert response.json()["scope_paths"] == ["/app", "/api/v1"]
+
+
+def test_scan_api_rejects_empty_path_scope():
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/scans",
+            json={
+                "url": "https://example.com/",
+                "authorised": True,
+                "scope_paths": [],
+            },
+        )
+    assert response.status_code == 422
