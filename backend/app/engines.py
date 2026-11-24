@@ -186,6 +186,52 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
             evidence="The response did not include X-Frame-Options or a CSP frame-ancestors directive.",
             recommendation="Set an appropriate Content-Security-Policy frame-ancestors directive, or X-Frame-Options for legacy browser support.",
         ))
+
+    # CORS and technology headers are passive configuration disclosures.
+    # A wildcard origin can be intentional for public resources, so this is
+    # an observation rather than a claim of exploitable cross-origin access.
+    cors_origin = h.get("access-control-allow-origin", "").strip()
+    if cors_origin == "*":
+        findings.append(Finding(
+            id="cors-wildcard-origin",
+            title="Wildcard CORS origin observed",
+            severity="low",
+            confidence="high",
+            evidence="The inspected response supplied Access-Control-Allow-Origin: *. This permits browser cross-origin reads of resources that are otherwise public; it does not by itself demonstrate access to private or credentialed data.",
+            recommendation="If cross-origin access is not intentionally public, replace the wildcard with an explicit allowlist of trusted origins. Review credential and exposed-header settings separately.",
+        ))
+
+    server_value = h.get("server", "").strip()
+    if server_value and re.search(r"\\d+\\.\\d+(?:\\.\\d+)?", server_value):
+        findings.append(Finding(
+            id="server-version-disclosure",
+            title="Server response exposes a version-like identifier",
+            severity="info",
+            confidence="medium",
+            evidence="The Server response header contains a version-like identifier. The exact value is omitted from the finding.",
+            recommendation="Consider minimising unnecessary server version details in response headers; keep software patched regardless of whether the version is disclosed.",
+        ))
+
+    powered_by = h.get("x-powered-by", "").strip()
+    if powered_by:
+        findings.append(Finding(
+            id="technology-header-disclosure",
+            title="X-Powered-By technology disclosure observed",
+            severity="info",
+            confidence="high",
+            evidence="The response includes an X-Powered-By header identifying an implementation technology. The header value is omitted from the finding.",
+            recommendation="Remove unnecessary X-Powered-By response headers where practical. This is informational hardening, not evidence that the disclosed technology is vulnerable.",
+        ))
+
+    if re.search(r"(?:^|[\\s;])(?:script-src|default-src)[^;]*(?:'unsafe-inline'|'unsafe-eval'|\\*)", csp):
+        findings.append(Finding(
+            id="csp-permissive-script-source",
+            title="Content Security Policy contains a permissive script source",
+            severity="low",
+            confidence="medium",
+            evidence="The inspected Content-Security-Policy includes unsafe-inline, unsafe-eval, or a wildcard in a script source directive. The impact depends on the complete policy and application behavior.",
+            recommendation="Where compatible with the application, prefer nonces or hashes for inline scripts, avoid unsafe-eval, and narrow script sources to trusted origins. Test policy changes before enforcement.",
+        ))
     return findings
 
 def _decode_js_literal(value: str) -> str:
