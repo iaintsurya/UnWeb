@@ -44,7 +44,7 @@ The gateway must:
 5. Preserve those gateway-generated headers when proxying to the frontend. The included Nginx configuration forwards them only on its internal API proxy request to FastAPI.
 6. Terminate public TLS and set the forwarded host/protocol headers correctly.
 
-The FastAPI service compares the shared secret in constant time and scopes saved scan history, details, audit events and rate-limit buckets to that authenticated identifier. Do not publish port 8000, do not attach untrusted containers to the ingress network, and do not allow clients to connect directly to the API.
+The FastAPI service compares the shared secret in constant time and scopes saved scan history, details, audit events, target authorizations and rate-limit buckets to that authenticated identifier. In production, users must prove DNS control of each exact hostname before scanning it: the dashboard creates a one-time TXT challenge, the user publishes it at `_unweb-verification.<hostname>`, and the API verifies it. Verified grants are limited to selected ports and path prefixes and expire after 30 days. Do not publish port 8000, do not attach untrusted containers to the ingress network, and do not allow clients to connect directly to the API.
 
 ## 3. Start the stack
 
