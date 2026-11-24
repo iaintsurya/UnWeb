@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: unweb-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend tests
