@@ -98,6 +98,9 @@ jobs:
           else:
               raise AssertionError("Unauthenticated API request unexpectedly succeeded")
           PY
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose --env-file .env.production.example -f docker-compose.production.yml logs --no-color redis api frontend
       - name: Show service health
         if: always()
         run: docker compose --env-file .env.production.example -f docker-compose.production.yml ps
