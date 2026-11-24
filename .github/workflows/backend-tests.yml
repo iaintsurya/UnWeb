@@ -86,7 +86,18 @@ jobs:
       - name: Verify frontend, API health, and authentication boundary
         run: |
           docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/
-          docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).read(); import urllib.error; req=urllib.request.Request('http://127.0.0.1:8000/api/scans'); exec('try:\n urllib.request.urlopen(req, timeout=5)\n raise AssertionError(\'unauthenticated request unexpectedly succeeded\')\nexcept urllib.error.HTTPError as e:\n assert e.code == 401, e.code')"
+          docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T api python - <<'PY'
+          import urllib.request
+          import urllib.error
+          urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=5).read()
+          request = urllib.request.Request("http://127.0.0.1:8000/api/scans")
+          try:
+              urllib.request.urlopen(request, timeout=5)
+          except urllib.error.HTTPError as error:
+              assert error.code == 401, error.code
+          else:
+              raise AssertionError("Unauthenticated API request unexpectedly succeeded")
+          PY
       - name: Show service health
         if: always()
         run: docker compose --env-file .env.production.example -f docker-compose.production.yml ps
