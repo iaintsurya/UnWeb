@@ -138,7 +138,44 @@ def analyze_security(headers: dict[str,str], final_url: str) -> list[Finding]:
             recommendation="Consider enabling HSTS after confirming every relevant subdomain is HTTPS-ready.",
         ))
 
-    csp = h.get("content-security-policy", "").lower()
+    # Header presence alone is not enough: a present but ineffective value
+    # should not be treated as a successful configuration observation.
+    xcto = h.get("x-content-type-options", "").strip().lower()
+    if xcto and xcto != "nosniff":
+        findings.append(Finding(
+            id="invalid-x-content-type-options",
+            title="X-Content-Type-Options does not use nosniff",
+            severity="low",
+            confidence="high",
+            evidence=f"The response supplied X-Content-Type-Options with value '{xcto[:120]}', rather than 'nosniff'.",
+            recommendation="Set X-Content-Type-Options: nosniff on applicable responses.",
+        ))
+
+    hsts = h.get("strict-transport-security", "")
+    if is_https and hsts:
+        max_age_values = re.findall(r"(?:^|;)\\s*max-age\\s*=\\s*([^;\\s]+)", hsts, flags=re.I)
+        if len(max_age_values) != 1 or not max_age_values[0].isdigit() or int(max_age_values[0]) == 0:
+            findings.append(Finding(
+                id="ineffective-strict-transport-security",
+                title="Strict-Transport-Security has no effective max-age",
+                severity="low",
+                confidence="high",
+                evidence="The HTTPS response supplied an HSTS header whose max-age directive is missing, ambiguous, invalid, or zero.",
+                recommendation="After confirming HTTPS readiness, configure one positive max-age value in Strict-Transport-Security.",
+            ))
+
+    csp_value = h.get("content-security-policy", "")
+    if "content-security-policy" in h and not csp_value.strip():
+        findings.append(Finding(
+            id="empty-content-security-policy",
+            title="Content-Security-Policy header is empty",
+            severity="low",
+            confidence="high",
+            evidence="The response included a Content-Security-Policy header with no policy directives.",
+            recommendation="Configure an intentional Content-Security-Policy, starting with a policy appropriate to the application's resources and testing it in report-only mode.",
+        ))
+
+    csp = csp_value.lower()
     has_frame_ancestors = "frame-ancestors" in csp
     if "x-frame-options" not in h and not has_frame_ancestors:
         findings.append(Finding(
