@@ -66,3 +66,7 @@ The current entry-response analysis inspects individual `Set-Cookie` headers for
 ## Roadmap principle
 
 Prefer fewer checks with strong evidence, clear false-positive handling and useful remediation over a long list of weak signatures. UnWeb should say what it tested, what it found, what it did not test, and what it cannot prove.
+
+## Implemented dependency advisory lookup
+
+The API can query the public OSV batch endpoint for exact lockfile-resolved versions in npm, PyPI, Go and crates.io. It accepts package coordinates only (not URLs), deduplicates identical package/version tuples, caps each request at 100 packages and the provider response at 2 MB, limits advisory records per package, and returns a small allowlisted set of metadata. The endpoint requires an explicit operator acknowledgement and applies an in-process rate limit. No dependency is downloaded, installed, or executed. An empty OSV result is not proof that a dependency is secure; feed coverage and publication timing vary. The acknowledgement is not authentication and this endpoint is not suitable for an unauthenticated public deployment.
