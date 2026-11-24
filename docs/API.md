@@ -30,10 +30,10 @@ This is advisory matching, not a complete dependency audit or proof of safety. A
 
 ## Limits and deployment notes
 
-- Website scans: at most two concurrent scans per API process, 120-second scan deadline, 10 submissions/minute per direct peer IP.
-- Repository scans: one concurrent repository analysis per process. ZIP uploads are limited to 5 submissions/minute per direct peer IP; public GitHub source scans share a separate 5-submission/minute process-local bucket.
-- Advisory lookups: bounded in-process rate limit of 10 requests/minute per direct peer IP.
-- These are process-local abuse controls, not shared identity-aware rate limits. Reverse-proxy deployments must configure trusted proxy handling before relying on client IPs.
+- Website scans: at most two concurrent scans per API process, 120-second scan deadline, 10 submissions/minute per authenticated user in the API process.
+- Repository scans: one concurrent repository analysis per process. ZIP uploads are limited to 5 submissions/minute per authenticated user in the API process (ZIP and GitHub source scans share the repository bucket).
+- Advisory lookups: bounded in-process rate limit of 10 requests/minute per authenticated user in the API process.
+- These are process-local per-identity abuse controls, not shared/distributed rate limits. Reverse-proxy deployments must configure trusted proxy handling before relying on client IPs.
 - CORS origins are configured with `UNWEB_CORS_ORIGINS`; configure an explicit allowlist.
 - URL validation and IP pinning are defence-in-depth. Public deployment requires external network egress controls, isolated workers, authentication, audit logging, shared rate limits and an independent security review.
 - The optional Playwright worker is a separate CLI and is not invoked by the API. Its container requires an externally enforced per-job default-deny egress policy.
