@@ -657,3 +657,15 @@ def test_readiness_returns_503_when_database_is_unavailable(monkeypatch):
         response = client.get("/api/health/ready")
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "service_not_ready"
+
+
+def test_auth_middleware_only_exempts_exact_health_routes(monkeypatch):
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "x" * 64)
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
+    with TestClient(main.app) as client:
+        live = client.get("/api/health")
+        ready = client.get("/api/health/ready")
+        lookalike = client.get("/api/health-private")
+    assert live.status_code == 200
+    assert ready.status_code == 200
+    assert lookalike.status_code == 401
