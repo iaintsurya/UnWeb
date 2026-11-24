@@ -153,6 +153,9 @@ def _normalize_authorization_hostname(raw: str) -> str:
     host = raw.rstrip(".").lower()
     try:
         host = host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise ValueError("Hostname contains invalid international characters.") from exc
+    try:
         ipaddress.ip_address(host)
         raise ValueError("DNS verification requires a domain name, not an IP address.")
     except ValueError as exc:
