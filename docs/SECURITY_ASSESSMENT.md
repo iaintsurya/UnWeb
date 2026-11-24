@@ -84,3 +84,14 @@ The website response analyser now distinguishes missing security headers from se
 ## Website path-scope enforcement
 
 Website scan requests accept 1–20 approved absolute URL path prefixes. The default `/` retains the previous whole-origin behavior; narrower prefixes use segment-aware matching. The scanner rejects unsafe or ambiguous scope entries, including hostnames, query strings, fragments, control characters, backslashes, encoded separators, and dot segments. The approved paths are enforced before the initial network request and across discovered page links, redirects, and same-origin JavaScript fetches. The normalized prefixes are included in scan results. Path scope supplements the existing scheme/host/port origin boundary; it is not authentication, ownership verification, or external network egress enforcement.
+
+
+## Trusted identity, owner isolation, and audit trail
+
+The API can be deployed behind a trusted identity gateway. When `UNWEB_ENV=production`, startup fails unless `UNWEB_AUTH_PROXY_SECRET` is configured. The reverse proxy must authenticate the user, strip client-supplied `X-UnWeb-Auth-Token` and `X-UnWeb-Auth-User` headers, and inject the shared secret plus a stable user identifier. The API validates the secret with a constant-time comparison, validates the identifier format, and rejects missing or invalid identities on API routes. The backend must remain network-private behind the proxy; the shared secret is not a substitute for network isolation or TLS.
+
+Persisted website scans are tagged with the authenticated owner ID. Scan history and scan detail/intelligence/sitemap/security/reconstruction endpoints query by both scan ID and owner ID, returning 404 for another user's scan. Existing SQLite databases are migrated with legacy rows assigned to the `local` owner. Scan retention is capped per owner so one user's activity does not evict another user's results. ZIP/GitHub repository analysis reports are still returned to the caller without being persisted.
+
+Rate-limit buckets are keyed by authenticated user identity inside each API process. They are not distributed across multiple workers or instances; use a shared gateway or external rate-limit service for production scale. Successful website scans, repository analyses, and advisory lookups write minimal owner-scoped audit events. The endpoint exposes only the authenticated user's events; the database keeps at most 1,000 events per owner. These local SQLite events are not tamper-proof and do not yet capture all rejected/failed requests. Forward security-relevant events to an independently controlled append-only log service for production.
+
+This is an integration contract for an external identity provider/reverse proxy, not a built-in login, password-reset, MFA, OAuth, team, or role-management implementation. The operator acknowledgement fields remain acknowledgements only and do not prove target ownership or permission.
