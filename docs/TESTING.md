@@ -52,3 +52,7 @@ The API test suite verifies that `POST /api/scans` returns HTTP 403 with `websit
 ## Dynamic SQL heuristic tests
 
 Backend tests cover f-string interpolation, concatenation, percent formatting and `.format()` as suspected SQL construction, while asserting that a literal placeholder query with a separate bind-parameter argument is not flagged.
+
+## Dependency advisory tests
+
+The OSV lookup tests use `httpx.MockTransport` and never call the live provider in CI. They cover ecosystem mapping, package de-duplication, advisory field allowlisting, unresolved/unsupported package rejection, the 100-package cap, and provider failures. API tests verify explicit acknowledgement and invalid package rejection. The UI uses only lockfile-resolved versions and submits at most 100 package coordinates per request; it does not infer versions from broad manifest constraints.
