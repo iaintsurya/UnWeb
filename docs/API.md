@@ -4,7 +4,8 @@ The API is a local engineering preview. It does not currently authenticate users
 
 ## Health and website scans
 
-- `GET /api/health` — service status and version.
+- `GET /api/health` — liveness endpoint.
+- `GET /api/health/ready` — readiness probe; verifies SQLite and, in production, Redis availability.
 - `GET /api/targets` — current user's unexpired, non-revoked verified target authorizations.
 - `POST /api/targets/challenges` with JSON `{"hostname":"example.com","ports":[443,80],"scope_paths":["/app"]}` — create a one-hour DNS TXT proof challenge. The response returns the one-time TXT value and record name.
 - `POST /api/targets/challenges/{challenge_id}/verify` — resolve the TXT proof and create a 30-day owner-scoped target authorization.
