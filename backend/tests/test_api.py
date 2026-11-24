@@ -364,3 +364,41 @@ def test_scan_api_rejects_empty_path_scope():
             },
         )
     assert response.status_code == 422
+
+
+def test_auth_proxy_rejects_missing_or_invalid_identity(monkeypatch):
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    with TestClient(main.app) as client:
+        missing = client.get("/api/scans")
+        invalid = client.get("/api/scans", headers={
+            "X-UnWeb-Auth-Token": "wrong",
+            "X-UnWeb-Auth-User": "alice",
+        })
+        accepted = client.get("/api/scans", headers={
+            "X-UnWeb-Auth-Token": "test-proxy-secret",
+            "X-UnWeb-Auth-User": "alice",
+        })
+    assert missing.status_code == 401
+    assert missing.json()["detail"]["code"] == "authentication_required"
+    assert invalid.status_code == 401
+    assert accepted.status_code == 200
+
+
+def test_scan_history_and_detail_are_isolated_by_authenticated_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "ownership.sqlite3")
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
+        return make_result()
+    monkeypatch.setattr(main, "scan_site", fake_scan_site)
+    headers = lambda user: {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
+    with TestClient(main.app) as client:
+        created = client.post("/api/scans", json={"url":"https://example.com/", "authorised":True}, headers=headers("alice"))
+        assert created.status_code == 200
+        alice_history = client.get("/api/scans", headers=headers("alice"))
+        bob_history = client.get("/api/scans", headers=headers("bob"))
+        bob_detail = client.get("/api/scans/api-test-scan", headers=headers("bob"))
+    assert len(alice_history.json()["items"]) == 1
+    assert bob_history.json()["items"] == []
+    assert bob_detail.status_code == 404
