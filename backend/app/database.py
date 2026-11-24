@@ -6,6 +6,7 @@ files out of version control; set UNWEB_DB_PATH to choose another location.
 import json
 import os
 import sqlite3
+import secrets
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
@@ -281,12 +282,14 @@ def verify_target_challenge(
         ).fetchone()
         if row is None or row["used_at"] is not None or row["expires_at"] <= verified_at:
             return None
-        if row["token_hash"] != token_hash:
+        if not secrets.compare_digest(row["token_hash"], token_hash):
             return None
-        connection.execute(
+        cursor = connection.execute(
             "UPDATE target_challenges SET used_at = ? WHERE challenge_id = ? AND owner_id = ? AND used_at IS NULL",
             (verified_at, challenge_id, owner_id),
         )
+        if cursor.rowcount != 1:
+            return None
         connection.execute(
             """INSERT INTO authorized_targets (
                 target_id, owner_id, hostname, ports_json, scope_paths_json, verified_at, expires_at
