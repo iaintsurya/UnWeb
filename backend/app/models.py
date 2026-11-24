@@ -11,6 +11,14 @@ class ScanRequest(BaseModel):
     target_id: str | None = Field(default=None, max_length=64)
 
 
+class BrowserJobRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2048)
+    target_id: str | None = Field(default=None, max_length=64)
+    scope_paths: list[str] = Field(default_factory=lambda: ["/"], min_length=1, max_length=20)
+    max_requests: int = Field(default=80, ge=1, le=150)
+    authorised: bool = False
+
+
 class Finding(BaseModel):
     id: str
     title: str

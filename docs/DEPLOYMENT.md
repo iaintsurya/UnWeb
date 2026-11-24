@@ -56,10 +56,11 @@ docker compose --env-file .env -f docker-compose.production.yml ps
 
 The gateway should route its authenticated upstream to the frontend service at `frontend:8080` on the ingress network. Do not add a host port mapping for either frontend or API unless a separate, trusted ingress layer is enforcing the same authentication boundary.
 
-The API waits for Redis health and refuses production startup if either the auth secret or `UNWEB_REDIS_URL` is missing. Redis rate limiting is atomic and shared across API processes. If Redis is unavailable after startup, rate-limited operations return HTTP 503; they do not fall back to a weaker in-memory limiter.
+The API and browser-worker service wait for Redis health and refuses production startup if either the auth secret or `UNWEB_REDIS_URL` is missing. Redis rate limiting is atomic and shared across API processes. If Redis is unavailable after startup, rate-limited operations return HTTP 503; they do not fall back to a weaker in-memory limiter.
 
 ## 4. Runtime boundaries
 
+- Browser worker runs as UID 10001 on the egress and internal data networks only; it has no ingress attachment and shares the SQLite volume with the API. Keep exactly one worker while using the single-instance SQLite deployment.
 - API runs as UID 10001, one Uvicorn worker, with a read-only root filesystem, dropped capabilities, no-new-privileges, a bounded temporary filesystem, and CPU/memory/PID limits.
 - Frontend runs using the unprivileged Nginx image on port 8080 with a read-only root filesystem and bounded writable tmpfs mounts.
 - Redis is not host-published and is connected only to an internal Compose network.
@@ -85,4 +86,4 @@ Update code only after CI passes, rebuild with Compose, and retain a known-good 
 
 ## 7. Deliberate limitations
 
-This deployment does not supply a configured OIDC/SAML provider, verify legal ownership of target hosts, create signed authorisation grants, enforce per-job dynamic egress allowlists, or provide tamper-proof external audit storage. Website path scopes are enforced within the submitted origin, but the consent boolean remains an operator acknowledgement. The Playwright worker remains a separate CLI/container prototype; it is not launched by API jobs. Repository analysis is a bounded static-analysis preview, not a complete SAST/SCA engine. Obtain an independent security review and implement these controls before offering the service as a public multi-tenant scanner.
+This deployment does not supply a configured OIDC/SAML provider, verify legal ownership of target hosts, create signed authorisation grants, enforce per-job dynamic egress allowlists, or provide tamper-proof external audit storage. Website path scopes are enforced within the submitted origin, but the consent boolean remains an operator acknowledgement. The Playwright worker is launched through API-managed Redis Streams jobs, but still relies on the external host/cloud default-deny egress firewall; its in-container exact-origin proxy is defence in depth. Repository analysis is a bounded static-analysis preview, not a complete SAST/SCA engine. Obtain an independent security review and implement these controls before offering the service as a public multi-tenant scanner.

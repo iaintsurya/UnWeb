@@ -29,6 +29,8 @@ from .repository_analysis import analyse_repository_archive, MAX_ARCHIVE_BYTES
 from .github_source import fetch_github_repository_archive, GitHubSourceError
 from .models import DependencyAdvisoryRequest, TargetAuthorizationChallengeRequest
 from .dependency_advisories import query_advisories, AdvisoryLookupError
+from . import browser_jobs
+from .models import BrowserJobRequest
 
 AUTH_PROXY_SECRET = os.environ.get("UNWEB_AUTH_PROXY_SECRET", "")
 UNWEB_ENV = os.environ.get("UNWEB_ENV", "development").strip().lower()
@@ -46,6 +48,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await asyncio.to_thread(REDIS_CLIENT.ping)
         _configure_rate_limiters(REDIS_CLIENT)
     await asyncio.to_thread(database.initialize_database)
+    await asyncio.to_thread(browser_jobs.initialize)
     yield
 
 
@@ -584,6 +587,78 @@ async def dependency_advisories(payload: DependencyAdvisoryRequest, request: Req
         raise HTTPException(502, detail={"code": "advisory_provider_error", "message": str(exc)}) from exc
 
 
+
+
+
+@app.post("/api/browser-jobs", status_code=202)
+async def create_browser_job(payload: BrowserJobRequest, request: Request):
+    """Queue a bounded Chromium render for an owner-verified HTTPS target."""
+    if not payload.authorised:
+        raise HTTPException(403, detail={"code": "browser_authorisation_required",
+            "message": "Confirm that you own or are explicitly authorised to assess this website."})
+    if not payload.target_id:
+        raise HTTPException(403, detail={"code": "verified_target_required",
+            "message": "Verify this domain in Target Authorizations before creating a browser job."})
+    try:
+        normalized_url = normalize_url(payload.url)
+        parts = urlsplit(normalized_url)
+        if parts.scheme != "https":
+            raise URLRejected("Browser intelligence requires an HTTPS target.")
+        scope_paths = normalize_scope_paths(payload.scope_paths)
+        scoped_payload = ScanRequest(url=normalized_url, authorised=True,
+                                     scope_paths=scope_paths, target_id=payload.target_id)
+        _enforce_verified_target(scoped_payload, request.state.user_id)
+    except (URLRejected, ValueError) as exc:
+        raise HTTPException(422, detail={"code": "invalid_browser_target", "message": str(exc)}) from exc
+    if REDIS_CLIENT is None:
+        raise HTTPException(503, detail={"code": "browser_queue_unavailable",
+            "message": "The browser job queue requires the configured Redis service."},
+            headers={"Retry-After": "5"})
+    retry_after = await _check_rate_limit(SCAN_RATE_LIMITER, request.state.user_id)
+    if retry_after:
+        raise HTTPException(429, detail={"code": "browser_job_rate_limited",
+            "message": "Too many browser jobs for this account."},
+            headers={"Retry-After": str(max(1, int(retry_after + 0.999)))})
+    job = await asyncio.to_thread(browser_jobs.create_job, request.state.user_id,
+                                  payload.target_id, normalized_url, scope_paths,
+                                  payload.max_requests)
+    try:
+        await asyncio.to_thread(browser_jobs.enqueue, REDIS_CLIENT, job["job_id"])
+    except RedisError as exc:
+        await asyncio.to_thread(browser_jobs.fail_queued_job, job["job_id"], "QueueUnavailable")
+        raise HTTPException(503, detail={"code": "browser_queue_unavailable",
+            "message": "The browser job could not be queued. Retry shortly."},
+            headers={"Retry-After": "5"}) from exc
+    await asyncio.to_thread(database.record_audit_event, request.state.user_id,
+                             "browser_scan.queued", job["job_id"],
+                             {"target_id": payload.target_id})
+    return job
+
+
+@app.get("/api/browser-jobs")
+async def list_browser_jobs(request: Request, limit: int = Query(default=20, ge=1, le=100)):
+    return {"items": await asyncio.to_thread(browser_jobs.list_jobs, request.state.user_id, limit)}
+
+
+@app.get("/api/browser-jobs/{job_id}")
+async def get_browser_job(job_id: str, request: Request):
+    job = await asyncio.to_thread(browser_jobs.get_job, job_id, request.state.user_id)
+    if job is None:
+        raise HTTPException(404, detail={"code": "browser_job_not_found", "message": "Browser job not found."})
+    return job
+
+
+@app.post("/api/browser-jobs/{job_id}/cancel")
+async def cancel_browser_job(job_id: str, request: Request):
+    status = await asyncio.to_thread(browser_jobs.cancel_job, job_id, request.state.user_id)
+    if status is None:
+        raise HTTPException(404, detail={"code": "browser_job_not_found", "message": "Browser job not found."})
+    if status != "cancelled":
+        raise HTTPException(409, detail={"code": "browser_job_not_cancellable",
+            "message": "Only queued browser jobs can be cancelled; running jobs finish within the worker time limit."})
+    await asyncio.to_thread(database.record_audit_event, request.state.user_id,
+                             "browser_scan.cancelled", job_id)
+    return {"job_id": job_id, "status": "cancelled"}
 
 
 @app.get("/api/targets")

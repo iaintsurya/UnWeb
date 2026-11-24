@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from urllib.parse import urlsplit, urlunsplit
 
@@ -295,12 +296,17 @@ async def run_browser_intelligence(
     *,
     max_requests: int = MAX_REQUESTS_DEFAULT,
     navigation_timeout_ms: int = 20_000,
+    scope_paths: list[str] | None = None,
 ) -> dict[str, object]:
     """Render one HTTPS page and return bounded, query-redacted evidence."""
     target_url = normalize_url(raw_url)
     target_origin = _origin_tuple(target_url)
     if target_origin[0] != "https":
         raise URLRejected("Browser intelligence currently requires an HTTPS target.")
+
+    scope_paths = scope_paths or ["/"]
+    if not _path_in_scope(target_url, scope_paths):
+        raise URLRejected("Browser start URL is outside the approved path scope.")
 
     max_requests = max(1, min(int(max_requests), 150))
     navigation_timeout_ms = max(1_000, min(int(navigation_timeout_ms), 30_000))
@@ -373,7 +379,7 @@ async def run_browser_intelligence(
                     allowed = request_origin == target_origin
                 except (URLRejected, ValueError):
                     allowed = False
-                if request_count > max_requests or not allowed:
+                if request_count > max_requests or not allowed or not _path_in_scope(request.url, scope_paths):
                     blocked_request_count += 1
                     await route.abort()
                     return
@@ -468,7 +474,7 @@ async def run_browser_intelligence(
                     "Captured network paths omit query strings and fragments; request bodies and headers are not stored.",
                     "Response byte counts are only those declared by Content-Length and are not a hard transfer cap.",
                     "The exact-origin CONNECT proxy is defence in depth; an external per-job egress firewall is mandatory.",
-                    "Browser execution remains optional and is not called by the FastAPI scan endpoint.",
+                    "Browser execution is performed by an isolated queue worker, not the synchronous website scan.",
                 ],
             }
 
@@ -507,11 +513,114 @@ async def run_browser_intelligence(
         await proxy.close()
 
 
+def _scope_contains(allowed: str, requested: str) -> bool:
+    base = allowed.rstrip("/") or "/"
+    return base == "/" or requested == base or requested.startswith(base + "/")
+
+
+def _path_in_scope(url: str, scope_paths: list[str]) -> bool:
+    from urllib.parse import unquote
+    path = urlsplit(url).path or "/"
+    if re.search(r"%(?:2f|5c)", path, re.IGNORECASE) or "\\\\" in path:
+        return False
+    decoded = unquote(path)
+    if "\\\\" in decoded or any(part in {".", ".."} for part in decoded.split("/")):
+        return False
+    return any(_scope_contains(prefix, decoded) for prefix in scope_paths)
+
+
+async def _execute_browser_job(job_id: str) -> None:
+    from datetime import datetime, timezone
+    from . import browser_jobs, database
+
+    job = await asyncio.to_thread(browser_jobs.claim_job, job_id)
+    if job is None:
+        return
+    owner_id = await asyncio.to_thread(browser_jobs.get_job_owner, job_id)
+    try:
+        target_id = job.get("target_id")
+        if not target_id:
+            raise URLRejected("A verified target authorization is required for browser jobs.")
+        target = await asyncio.to_thread(
+            database.get_authorized_target, target_id, owner_id,
+            datetime.now(timezone.utc).isoformat()
+        )
+        if target is None:
+            raise URLRejected("The verified target authorization is expired, revoked, or unavailable.")
+        parts = urlsplit(normalize_url(job["url"]))
+        hostname = parts.hostname.encode("idna").decode("ascii").lower() if parts.hostname else ""
+        port = parts.port or 443
+        if parts.scheme != "https" or hostname != target["hostname"] or port not in target["ports"]:
+            raise URLRejected("Browser job URL is outside its verified HTTPS host/port scope.")
+        if not all(any(_scope_contains(allowed, requested) for allowed in target["scope_paths"])
+                   for requested in job["scope_paths"]):
+            raise URLRejected("Browser job path scope exceeds the verified target authorization.")
+        result = await run_browser_intelligence(
+            job["url"], max_requests=job["max_requests"], scope_paths=job["scope_paths"]
+        )
+        await asyncio.to_thread(browser_jobs.complete_job, job_id, result)
+        await asyncio.to_thread(database.record_audit_event, owner_id,
+                                 "browser_scan.completed", job_id, {"target_id": target_id})
+    except Exception as exc:
+        await asyncio.to_thread(browser_jobs.fail_job, job_id, type(exc).__name__)
+        await asyncio.to_thread(database.record_audit_event, owner_id,
+                                 "browser_scan.failed", job_id, {"error_code": type(exc).__name__})
+
+
+async def run_browser_worker() -> None:
+    """Consume durable browser jobs; production Compose intentionally runs one consumer."""
+    import os
+    import socket
+    import uuid
+    from redis import Redis
+    from redis.exceptions import ResponseError
+    from . import browser_jobs, database
+
+    redis_url = os.environ.get("UNWEB_REDIS_URL", "").strip()
+    if not redis_url:
+        raise RuntimeError("UNWEB_REDIS_URL is required for browser worker mode.")
+    client = Redis.from_url(redis_url, socket_connect_timeout=3, socket_timeout=5,
+                            decode_responses=True)
+    await asyncio.to_thread(client.ping)
+    await asyncio.to_thread(database.initialize_database)
+    await asyncio.to_thread(browser_jobs.initialize)
+    try:
+        await asyncio.to_thread(client.xgroup_create, browser_jobs.STREAM_NAME,
+                                browser_jobs.CONSUMER_GROUP, id="0", mkstream=True)
+    except ResponseError as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
+    await asyncio.to_thread(browser_jobs.recover_interrupted_jobs)
+    consumer = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
+    while True:
+        reclaimed = await asyncio.to_thread(
+            client.xautoclaim, browser_jobs.STREAM_NAME, browser_jobs.CONSUMER_GROUP,
+            consumer, 60_000, "0-0", 1
+        )
+        messages = reclaimed[1] if reclaimed and len(reclaimed) > 1 else []
+        if not messages:
+            batches = await asyncio.to_thread(
+                client.xreadgroup, browser_jobs.CONSUMER_GROUP, consumer,
+                {browser_jobs.STREAM_NAME: ">"}, 1, 5000
+            )
+            messages = batches[0][1] if batches else []
+        for message_id, fields in messages:
+            try:
+                job_id = fields.get("job_id")
+                if job_id:
+                    await _execute_browser_job(job_id)
+            finally:
+                await asyncio.to_thread(client.xack, browser_jobs.STREAM_NAME,
+                                        browser_jobs.CONSUMER_GROUP, message_id)
+
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="One-shot, exact-origin UnWeb Chromium intelligence worker."
     )
-    parser.add_argument("--url", required=True, help="HTTPS URL that you own or are authorised to analyse.")
+    parser.add_argument("--worker", action="store_true", help="Run the Redis-backed job consumer.")
+    parser.add_argument("--url", help="HTTPS URL that you own or are authorised to analyse.")
     parser.add_argument("--max-requests", type=int, default=MAX_REQUESTS_DEFAULT)
     parser.add_argument("--navigation-timeout-ms", type=int, default=20_000)
     parser.add_argument(
@@ -520,6 +629,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Confirm this runs in a disposable non-root worker with external per-job egress filtering.",
     )
     args = parser.parse_args(argv)
+    if args.worker:
+        try:
+            asyncio.run(run_browser_worker())
+        except KeyboardInterrupt:
+            return 0
+        return 0
+    if not args.url:
+        parser.error("--url is required unless --worker is selected.")
     if not args.confirm_isolated_egress:
         print(
             "Refusing to launch: run inside a disposable non-root worker with an external "

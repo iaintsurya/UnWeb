@@ -21,6 +21,17 @@ The API is a local engineering preview. It does not currently authenticate users
 
 Website scans are stored in the configured SQLite database. The default path is `backend/data/unweb.sqlite3`; set `UNWEB_DB_PATH` to change it. The newest 250 scans are retained by default.
 
+## Asynchronous browser jobs
+
+- `POST /api/browser-jobs` — JSON body such as `{"url":"https://example.com/","target_id":"<verified-target-id>","scope_paths":["/app"],"max_requests":80,"authorised":true}`. Returns HTTP 202 with a job ID and `queued` status.
+- `GET /api/browser-jobs?limit=20` — recent jobs belonging to the authenticated user.
+- `GET /api/browser-jobs/{job_id}` — status and, when complete, the bounded browser evidence result. Jobs belonging to another user return 404.
+- `POST /api/browser-jobs/{job_id}/cancel` — cancel a queued job. Running jobs cannot be cancelled mid-render; they finish within the worker time limit.
+
+Browser jobs require HTTPS, explicit operator acknowledgement, a verified target grant, and a path scope no broader than that grant. The worker rechecks the grant immediately before rendering, blocks cross-origin requests, enforces path prefixes at the browser request boundary, and uses the existing exact-origin CONNECT proxy with public-IP validation. Job metadata and results are stored in the shared SQLite volume; Redis Streams carries only job IDs. The worker runs separately from ingress and is configured as a single consumer against the single-instance SQLite deployment.
+
+The browser worker does not log in, submit forms, execute user-provided scripts, or interact with target accounts. External host/cloud default-deny egress filtering remains mandatory; the CONNECT proxy is defence in depth, not a substitute for network isolation.
+
 ## Repository analysis
 
 - `POST /api/repository-scans` — raw ZIP request body with `Content-Type: application/zip`, `X-UnWeb-Authorised: true`, and optional URL-encoded `X-Repository-Filename`. Streams up to 50 MB into a temporary file, analyses it, returns JSON, and deletes the archive.
@@ -42,7 +53,7 @@ This is advisory matching, not a complete dependency audit or proof of safety. A
 - These are process-local per-identity abuse controls, not shared/distributed rate limits. Reverse-proxy deployments must configure trusted proxy handling before relying on client IPs.
 - CORS origins are configured with `UNWEB_CORS_ORIGINS`; configure an explicit allowlist.
 - URL validation and IP pinning are defence-in-depth. Public deployment requires external network egress controls, isolated workers, authentication, audit logging, shared rate limits and an independent security review.
-- The optional Playwright worker is a separate CLI and is not invoked by the API. Its container requires an externally enforced per-job default-deny egress policy.
+- The Playwright worker is invoked through the Redis-backed browser job API and runs as a separate non-root Compose service without ingress access. Its container still requires externally enforced default-deny egress controls.
 
 ## Website scan path scopes
 

@@ -60,6 +60,35 @@ services:
     cpus: 1.5
     pids_limit: 128
 
+  browser-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser-worker
+    command: ["--worker"]
+    environment:
+      UNWEB_ENV: production
+      UNWEB_REDIS_URL: redis://redis:6379/0
+      UNWEB_DB_PATH: /data/unweb.sqlite3
+    volumes:
+      - unweb_data:/data
+    networks:
+      - egress
+      - data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1536m
+    cpus: 1.5
+    pids_limit: 128
+
   frontend:
     build:
       context: .
