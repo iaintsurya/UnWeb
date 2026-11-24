@@ -5,6 +5,10 @@ The API is a local engineering preview. It does not currently authenticate users
 ## Health and website scans
 
 - `GET /api/health` — service status and version.
+- `GET /api/targets` — current user's unexpired, non-revoked verified target authorizations.
+- `POST /api/targets/challenges` with JSON `{"hostname":"example.com","ports":[443,80],"scope_paths":["/app"]}` — create a 15-minute DNS TXT proof challenge. The response returns the one-time TXT value and record name.
+- `POST /api/targets/challenges/{challenge_id}/verify` — resolve the TXT proof and create a 30-day owner-scoped target authorization.
+- `POST /api/targets/{target_id}/revoke` — revoke the current user's target authorization.
 - `GET /api/audit-events?limit=50` — recent owner-scoped audit events (limit 1–100).
 - `POST /api/scans` — JSON body such as `{"url":"https://example.com","max_pages":8,"authorised":true}`. Requires `authorised: true`; accepts 1–30 pages. The scan is constrained to the submitted scheme/host/port origin, including initial redirects, later page requests and JavaScript fetches.
 - `GET /api/scans?limit=20` — recent scan summaries; limit 1–100.
@@ -66,3 +70,10 @@ Completed website scans, ZIP repository analyses, public GitHub repository analy
 Production startup requires `UNWEB_REDIS_URL` in addition to the trusted authentication gateway secret. The API pings Redis at startup and installs atomic Redis Lua sliding-window limiters shared across API processes: 10 website scan submissions/minute/user, 5 repository analyses/minute/user (ZIP and GitHub share this bucket), and 10 dependency advisory lookups/minute/user. Redis server time is used for consistent windows. If Redis becomes unavailable, rate-limited endpoints fail closed with HTTP 503 rather than silently falling back to a process-local limiter. The in-memory limiter remains for local development and unit tests.
 
 The production Compose deployment runs one API worker with SQLite on a persistent volume, Redis on an internal-only network, and a non-root frontend container. It does not publish API or frontend ports to the host: an external trusted ingress/authentication gateway must be attached to the ingress network and route users to the frontend. The gateway must protect both the UI and all `/api/` routes, strip client-supplied identity headers, and inject the configured secret and authenticated stable user ID. The API must not be exposed directly. See `docs/DEPLOYMENT.md` for setup and network requirements.
+
+
+## DNS-verified target authorization
+
+In production, `POST /api/scans` requires a valid `target_id` in addition to `authorised: true`. Create a challenge for the exact fully-qualified hostname, chosen TCP ports, and path prefixes. Publish the returned `unweb-verification=<random-token>` TXT value at `_unweb-verification.<hostname>`, wait for DNS propagation, then call the verify endpoint. The token is shown only once; only its SHA-256 hash is stored. Challenges expire after 15 minutes and are single-use. A successful proof creates a 30-day authorization owned by the authenticated user; the dashboard supports selecting and revoking these grants.
+
+A production scan must match the exact verified hostname and one of its approved ports. Every requested path prefix must be equal to or narrower than an authorized path prefix (segment-aware). Another user's target ID, revoked grants, and expired grants are rejected. The API limits challenge creation/verification to five requests per minute per user. DNS proof demonstrates control of the domain's DNS zone at verification time; it is not legal advice, does not establish control of every third-party service behind a CNAME, and does not replace explicit operator permission or external network egress policy. Renew expired authorizations by completing a new challenge.
