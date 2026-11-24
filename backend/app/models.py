@@ -37,6 +37,7 @@ class ScanResult(BaseModel):
     id: str
     requested_url: str
     final_url: str
+    scope_paths: list[str] = Field(default_factory=lambda: ["/"])
     status_code: int
     scanned_at: str
     title: str | None = None
