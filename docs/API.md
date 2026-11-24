@@ -5,7 +5,8 @@ The API is an engineering preview. In production it relies on a trusted reverse-
 ## Health and website scans
 
 - `GET /api/health` — liveness endpoint.
-- `GET /api/health/ready` — readiness for SQLite and Redis; `GET /api/health/browser-worker` reports whether the isolated Redis-stream browser consumer has a live heartbeat (503 when unavailable). — readiness probe; verifies SQLite and, in production, Redis availability.
+- `GET /api/health/ready` — readiness probe; verifies SQLite and, in production, Redis availability.
+- `GET /api/health/browser-worker` — reports whether the isolated Redis Streams browser consumer has a fresh heartbeat (503 when unconfigured or offline).
 - `GET /api/targets` — current user's unexpired, non-revoked verified target authorizations.
 - `POST /api/targets/challenges` with JSON `{"hostname":"example.com","ports":[443,80],"scope_paths":["/app"]}` — create a one-hour DNS TXT proof challenge. The response returns the one-time TXT value and record name.
 - `POST /api/targets/challenges/{challenge_id}/verify` — resolve the TXT proof and create a 30-day owner-scoped target authorization.
@@ -37,7 +38,7 @@ The browser worker does not log in, submit forms, execute user-provided scripts,
 - `POST /api/repository-scans` — raw ZIP request body with `Content-Type: application/zip`, `X-UnWeb-Authorised: true`, and optional URL-encoded `X-Repository-Filename`. Streams up to 50 MB into a temporary file, analyses it, returns JSON, and deletes the archive.
 - `POST /api/github-repository-scans` — JSON body such as `{"repository_url":"https://github.com/owner/repository","ref":"main","authorised":true}`. Accepts canonical public GitHub repository URLs, resolves the ref to an immutable commit SHA, streams a source ZIP from the approved GitHub archive host (maximum 50 MB), analyses it, returns commit identity and deletes the temporary archive. Omit `ref` to use the repository default branch.
 
-The acknowledgement is not authentication. Public GitHub ingestion does not support private repositories, OAuth/App installation or personal access tokens. Repository reports are returned to the caller and are not persisted.
+The acknowledgement is not authentication. Public GitHub ingestion does not support private repositories, OAuth/App installation or personal access tokens. Repository reports are returned to the caller and are not persisted. The Repository workspace exports the report as JSON or SARIF 2.1.0; SARIF findings preserve stable IDs, source locations, severity, confidence and suspected validation state.
 
 ## Dependency advisory lookup
 
