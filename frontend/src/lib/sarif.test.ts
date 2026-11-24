@@ -50,7 +50,7 @@ describe("repositoryReportToSarif", () => {
     };
     const result = repositoryReportToSarif({ ...base, security_findings: [structured] });
     expect(result.runs[0].results[0].partialFingerprints.unwebFindingId).toBe("unw_abc123");
-    expect(result.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri).toBe("src/app.py");
+    expect(result.runs[0].results[0].locations?.[0]?.physicalLocation.artifactLocation.uri).toBe("src/app.py");
   });
 
   it("omits malformed source locations", () => {
