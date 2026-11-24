@@ -132,3 +132,37 @@ def test_audit_events_are_owner_scoped_and_return_structured_metadata(tmp_path, 
     assert alice_events[0]["resource_id"] == "scan-1"
     assert alice_events[0]["metadata"] == {"pages": 3}
     assert database.list_audit_events("bob")[0]["resource_id"] == "scan-2"
+
+
+def test_dns_verified_targets_are_owner_scoped_single_use_and_revocable(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import hashlib
+
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "targets.sqlite3")
+    database.initialize_database()
+    now = datetime.now(timezone.utc)
+    created = now.isoformat()
+    expires = (now + timedelta(minutes=15)).isoformat()
+    target_expires = (now + timedelta(days=30)).isoformat()
+    token_hash = hashlib.sha256(b"unweb-verification=test-token").hexdigest()
+
+    database.save_target_challenge(
+        "challenge-1", "alice", "example.com", [443, 80], ["/app"], token_hash, created, expires
+    )
+    challenge = database.get_target_challenge("challenge-1", "alice")
+    assert challenge["hostname"] == "example.com"
+    assert challenge["scope_paths"] == ["/app"]
+    assert database.get_target_challenge("challenge-1", "bob") is None
+
+    verified = database.verify_target_challenge(
+        "challenge-1", "alice", token_hash, created, target_expires
+    )
+    assert verified["target_id"] == "challenge-1"
+    assert database.verify_target_challenge(
+        "challenge-1", "alice", token_hash, created, target_expires
+    ) is None
+    assert database.get_authorized_target("challenge-1", "alice", created) is not None
+    assert database.get_authorized_target("challenge-1", "bob", created) is None
+    assert len(database.list_authorized_targets("alice", created)) == 1
+    assert database.revoke_authorized_target("challenge-1", "alice", created)
+    assert database.get_authorized_target("challenge-1", "alice", created) is None
