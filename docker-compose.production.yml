@@ -78,6 +78,16 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from redis import Redis; import os; r=Redis.from_url(os.environ['UNWEB_REDIS_URL'], socket_connect_timeout=2, socket_timeout=2); assert r.get('unweb:browser-worker:heartbeat') and r.ttl('unweb:browser-worker:heartbeat') > 0"
+      interval: 15s
+      timeout: 4s
+      retries: 3
+      start_period: 20s
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
