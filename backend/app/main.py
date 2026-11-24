@@ -23,7 +23,6 @@ from .github_source import fetch_github_repository_archive, GitHubSourceError
 from .models import DependencyAdvisoryRequest
 from .dependency_advisories import query_advisories, AdvisoryLookupError
 
-@asynccontextmanager
 AUTH_PROXY_SECRET = os.environ.get("UNWEB_AUTH_PROXY_SECRET", "")
 UNWEB_ENV = os.environ.get("UNWEB_ENV", "development").strip().lower()
 
