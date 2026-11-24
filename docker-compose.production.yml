@@ -33,6 +33,7 @@ services:
       UNWEB_CORS_ORIGINS: ${UNWEB_CORS_ORIGINS:-}
     volumes:
       - unweb_data:/data
+      - ./backups:/backups
     networks:
       - ingress
       - egress
