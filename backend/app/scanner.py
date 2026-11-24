@@ -2,6 +2,7 @@ import asyncio
 import uuid
 import httpx
 import ipaddress
+import re
 
 from collections import deque
 from datetime import datetime, timezone
@@ -48,6 +49,8 @@ def _canonical_scope_path(raw: str) -> str:
         raise URLRejected("Scope entries must contain only a URL path, without query or fragment.")
     decoded = raw
     for _ in range(2):
+        if re.search(r"%(?:2f|5c)", decoded, re.IGNORECASE):
+            raise URLRejected("Encoded path separators are not allowed in scope paths.")
         decoded = unquote(decoded)
         if "\\" in decoded or any(ord(char) < 32 for char in decoded):
             raise URLRejected("Scope path contains an encoded separator or control character.")
