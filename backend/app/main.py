@@ -89,7 +89,7 @@ async def require_trusted_identity(request: Request, call_next):
         not secrets.compare_digest(supplied_secret, AUTH_PROXY_SECRET)
         or not user_id
         or len(user_id) > 128
-        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9@._:+-]*", user_id)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9@._:+|~-]*", user_id)
     ):
         return JSONResponse(
             status_code=401,
