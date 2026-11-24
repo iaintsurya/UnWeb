@@ -372,7 +372,7 @@ def test_scan_api_rejects_empty_path_scope():
 
 def test_auth_proxy_rejects_missing_or_invalid_identity(monkeypatch):
     monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
-    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "UNWEB_ENV", "development")
     with TestClient(main.app) as client:
         missing = client.get("/api/scans")
         invalid = client.get("/api/scans", headers={
