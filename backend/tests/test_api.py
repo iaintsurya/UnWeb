@@ -418,3 +418,29 @@ def test_auth_gateway_allows_cors_preflight_without_identity(monkeypatch):
         )
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_scan_rate_limit_is_scoped_to_authenticated_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "user-limits.sqlite3")
+    monkeypatch.setattr(main, "AUTH_PROXY_SECRET", "test-proxy-secret")
+    monkeypatch.setattr(main, "UNWEB_ENV", "production")
+    monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(1, 60))
+
+    async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
+        result = make_result()
+        result.id = url
+        result.requested_url = url
+        result.final_url = url
+        result.page.url = url
+        return result
+
+    monkeypatch.setattr(main, "scan_site", fake_scan_site)
+    headers = lambda user: {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
+    with TestClient(main.app) as client:
+        alice_first = client.post("/api/scans", json={"url":"https://example.com/a", "authorised":True}, headers=headers("alice"))
+        alice_second = client.post("/api/scans", json={"url":"https://example.com/b", "authorised":True}, headers=headers("alice"))
+        bob_first = client.post("/api/scans", json={"url":"https://example.com/c", "authorised":True}, headers=headers("bob"))
+
+    assert alice_first.status_code == 200
+    assert alice_second.status_code == 429
+    assert bob_first.status_code == 200
