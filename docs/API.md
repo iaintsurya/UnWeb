@@ -37,3 +37,7 @@ This is advisory matching, not a complete dependency audit or proof of safety. A
 - CORS origins are configured with `UNWEB_CORS_ORIGINS`; configure an explicit allowlist.
 - URL validation and IP pinning are defence-in-depth. Public deployment requires external network egress controls, isolated workers, authentication, audit logging, shared rate limits and an independent security review.
 - The optional Playwright worker is a separate CLI and is not invoked by the API. Its container requires an externally enforced per-job default-deny egress policy.
+
+## Website scan path scopes
+
+Website scan requests accept `scope_paths`, a list of 1–20 absolute URL path prefixes. The default is `["/"]`, which retains the existing whole-origin crawl behavior. To narrow a scan, provide values such as `["/app", "/api/v1"]`. Matching is segment-aware (`/app` includes `/app` and `/app/users`, but not `/application`). Query strings, fragments, hostnames, control characters, backslashes, encoded separators, and dot segments are rejected in scope entries. The starting URL, discovered page links, redirects, and same-origin JavaScript fetches are constrained to the approved prefixes. The response records the normalized scope paths. This remains a path boundary within the submitted origin; it does not add authentication, ownership verification, or network egress enforcement.
