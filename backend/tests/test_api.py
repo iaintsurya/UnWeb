@@ -691,6 +691,9 @@ def test_browser_worker_health_reports_heartbeat_state(
     monkeypatch, heartbeat, ttl, status_code, expected
 ):
     class FakeRedis:
+        def ping(self):
+            return True
+
         def get(self, key):
             assert key == "unweb:browser-worker:heartbeat"
             return heartbeat
