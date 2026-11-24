@@ -67,7 +67,7 @@ def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path, mon
 
 def test_backup_rejects_same_path_missing_source_and_corrupt_database(tmp_path, monkeypatch):
     source = tmp_path / "source.sqlite3"
-    _seed_database(source)
+    _seed_database(source, monkeypatch)
     with pytest.raises(ValueError):
         backup_database(source, source)
     with pytest.raises(FileNotFoundError):
