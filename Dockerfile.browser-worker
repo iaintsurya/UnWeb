@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /opt/unweb
 
 COPY backend/requirements-browser.txt ./
-RUN python -m pip install --no-cache-dir -r requirements-browser.txt \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir -r requirements-browser.txt \
     && python -m playwright install --with-deps chromium
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin unweb \
