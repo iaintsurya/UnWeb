@@ -101,3 +101,16 @@ def test_existing_database_is_migrated_to_local_owner(tmp_path, monkeypatch):
     database.initialize_database()
     assert database.get_scan("legacy-scan", "local") is not None
     assert database.get_scan("legacy-scan", "alice") is None
+
+
+def test_retention_limit_does_not_delete_another_owners_scans(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "retention-owners.sqlite3")
+    monkeypatch.setattr(database, "MAX_STORED_SCANS", 1)
+    database.initialize_database()
+    database.save_scan(sample_result("bob-scan"), owner_id="bob")
+    database.save_scan(sample_result("alice-old"), owner_id="alice")
+    database.save_scan(sample_result("alice-new"), owner_id="alice")
+
+    assert database.get_scan("bob-scan", "bob") is not None
+    assert database.get_scan("alice-old", "alice") is None
+    assert database.get_scan("alice-new", "alice") is not None
