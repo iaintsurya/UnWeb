@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/unweb
 
-COPY backend/requirements.txt backend/requirements-browser.txt ./
+COPY backend/requirements-browser.txt ./
 RUN python -m pip install --no-cache-dir -r requirements-browser.txt \
     && python -m playwright install --with-deps chromium
 
