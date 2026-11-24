@@ -8,8 +8,8 @@ from app.maintenance import backup_database, restore_database
 from app.models import PageSummary, ScanResult
 
 
-def _seed_database(path: Path) -> None:
-    database.DB_PATH = path
+def _seed_database(path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(database, "DB_PATH", path)
     database.initialize_database()
     result = ScanResult(
         id="maintenance-scan",
@@ -29,7 +29,7 @@ def _seed_database(path: Path) -> None:
 def test_online_backup_includes_committed_wal_data_and_is_private(tmp_path, monkeypatch):
     source = tmp_path / "source.sqlite3"
     destination = tmp_path / "backups" / "snapshot.sqlite3"
-    _seed_database(source)
+    _seed_database(source, monkeypatch)
 
     created = backup_database(source, destination)
 
@@ -40,7 +40,7 @@ def test_online_backup_includes_committed_wal_data_and_is_private(tmp_path, monk
         assert connection.execute("SELECT COUNT(*) FROM scans").fetchone()[0] == 1
 
 
-def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path):
+def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path, monkeypatch):
     source = tmp_path / "source.sqlite3"
     backup = tmp_path / "backup.sqlite3"
     destination = tmp_path / "restored.sqlite3"
@@ -59,7 +59,7 @@ def test_restore_replaces_destination_only_when_explicitly_allowed(tmp_path):
         ).fetchone()[0] == "maintenance-scan"
 
 
-def test_backup_rejects_same_path_missing_source_and_corrupt_database(tmp_path):
+def test_backup_rejects_same_path_missing_source_and_corrupt_database(tmp_path, monkeypatch):
     source = tmp_path / "source.sqlite3"
     _seed_database(source)
     with pytest.raises(ValueError):
