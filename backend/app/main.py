@@ -33,17 +33,31 @@ from . import browser_jobs
 from .models import BrowserJobRequest
 
 AUTH_PROXY_SECRET = os.environ.get("UNWEB_AUTH_PROXY_SECRET", "")
-UNWEB_ENV = os.environ.get("UNWEB_ENV", "development").strip().lower()
+# Fail closed: an unset environment is treated as production. Local development
+# must explicitly opt in with UNWEB_ENV=development (or test).
+UNWEB_ENV = os.environ.get("UNWEB_ENV", "production").strip().lower()
+ALLOW_UNAUTHENTICATED_LOCAL = os.environ.get("UNWEB_ALLOW_UNAUTHENTICATED_LOCAL", "").strip().lower() in {"1", "true", "yes"}
 REDIS_URL = os.environ.get("UNWEB_REDIS_URL", "").strip()
 REDIS_CLIENT = Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2) if REDIS_URL else None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    if UNWEB_ENV == "production" and len(AUTH_PROXY_SECRET) < 32:
-        raise RuntimeError("UNWEB_AUTH_PROXY_SECRET must contain at least 32 characters in production.")
-    if UNWEB_ENV == "production" and not REDIS_CLIENT:
-        raise RuntimeError("UNWEB_REDIS_URL is required in production for shared rate limits.")
+    if UNWEB_ENV not in {"production", "development", "test"}:
+        raise RuntimeError(f"UNWEB_ENV must be one of production/development/test, got {UNWEB_ENV!r}.")
+    if UNWEB_ENV == "production":
+        if len(AUTH_PROXY_SECRET) < 32:
+            raise RuntimeError("UNWEB_AUTH_PROXY_SECRET must contain at least 32 characters in production.")
+        if not REDIS_CLIENT:
+            raise RuntimeError("UNWEB_REDIS_URL is required in production for shared rate limits.")
+    elif not AUTH_PROXY_SECRET and not ALLOW_UNAUTHENTICATED_LOCAL:
+        # Development mode without a proxy secret would accept any request as a
+        # single local user; require an explicit second opt-in for that.
+        raise RuntimeError(
+            "Development mode without UNWEB_AUTH_PROXY_SECRET requires the explicit "
+            "opt-in UNWEB_ALLOW_UNAUTHENTICATED_LOCAL=true. Never expose such an "
+            "instance beyond a trusted loopback interface."
+        )
     if REDIS_CLIENT:
         await asyncio.to_thread(REDIS_CLIENT.ping)
         _configure_rate_limiters(REDIS_CLIENT)
@@ -88,8 +102,14 @@ async def require_trusted_identity(request: Request, call_next):
                 status_code=503,
                 content={"detail": {"code": "auth_proxy_not_configured", "message": "Trusted authentication is not configured."}},
             )
-        request.state.user_id = "local"
-        return await call_next(request)
+        if ALLOW_UNAUTHENTICATED_LOCAL:
+            # Explicit local-development opt-in (validated at startup as well).
+            request.state.user_id = request.headers.get("x-unweb-auth-user", "").strip() or "local"
+            return await call_next(request)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": {"code": "auth_proxy_not_configured", "message": "Trusted authentication is not configured."}},
+        )
 
     supplied_secret = request.headers.get("x-unweb-auth-token", "")
     user_id = request.headers.get("x-unweb-auth-user", "").strip()
@@ -463,6 +483,9 @@ async def create_repository_scan(request: Request):
             ) from exc
 
         supplied_name = unquote(request.headers.get("x-repository-filename", "repository.zip"))
+        # Strip control characters (HTTP headers already exclude CR/LF, but be
+        # defensive after percent-decoding) before deriving the display name.
+        supplied_name = "".join(c for c in supplied_name if ord(c) >= 32 and ord(c) != 127)
         safe_name = Path(supplied_name.replace("\\", "/")).name
         repository_name = Path(safe_name).stem
         report.repository = repository_name[:100] or "repository"
@@ -802,7 +825,15 @@ async def verify_target_challenge(challenge_id: str, request: Request):
     if challenge["used_at"] is not None:
         raise HTTPException(409, detail={"code": "target_challenge_used", "message": "This verification challenge has already been used."})
     now = _utc_now()
-    if challenge["expires_at"] <= now.isoformat():
+    # Parse the stored timestamp instead of relying on lexicographic ISO string
+    # comparison, which breaks across offsets and precisions.
+    try:
+        expires_at = datetime.fromisoformat(challenge["expires_at"])
+    except (TypeError, ValueError):
+        expires_at = now - timedelta(seconds=1)
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now:
         raise HTTPException(410, detail={"code": "target_challenge_expired", "message": "The DNS challenge expired. Create a new challenge."})
     try:
         records = await asyncio.to_thread(lookup_target_dns_txt, challenge["hostname"])

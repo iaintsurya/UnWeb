@@ -342,10 +342,16 @@ async def run_browser_intelligence(
         nonlocal request_count, blocked_request_count, declared_response_bytes
 
         async with async_playwright() as playwright:
+            # Launch Chromium with a minimal environment so worker secrets
+            # (UNWEB_AUTH_PROXY_SECRET, UNWEB_REDIS_URL, cloud/GitHub tokens)
+            # are never inherited by the browser process tree.
+            safe_env = {key: value for key, value in os.environ.items() if key in {"HOME", "TMPDIR", "TEMP", "TZ"}}
+            safe_env.setdefault("HOME", "/tmp")
             browser_instance = await playwright.chromium.launch(
                 headless=True,
                 chromium_sandbox=True,
                 proxy={"server": proxy_url},
+                env=safe_env,
                 args=[
                     "--disable-quic",
                     "--proxy-bypass-list=<-loopback>",
@@ -569,6 +575,13 @@ async def _execute_browser_job(job_id: str) -> None:
         )
         if target is None:
             raise URLRejected("The verified target authorization is expired, revoked, or unavailable.")
+        # Defense-in-depth against a compromised Redis stream: the job row was
+        # written by the API after DNS verification, but re-check that its URL
+        # still matches the hostname recorded in the durable authorization.
+        job_hostname = urlsplit(job["url"]).hostname
+        job_hostname = job_hostname.rstrip(".").lower().encode("idna").decode("ascii") if job_hostname else ""
+        if job_hostname != target["hostname"]:
+            raise URLRejected("Browser job URL does not match its verified target hostname.")
         parts = urlsplit(normalize_url(job["url"]))
         hostname = parts.hostname.encode("idna").decode("ascii").lower() if parts.hostname else ""
         port = parts.port or 443

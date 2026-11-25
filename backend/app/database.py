@@ -16,7 +16,9 @@ from .models import ScanResult
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "unweb.sqlite3"
 DB_PATH = Path(os.environ.get("UNWEB_DB_PATH", str(DEFAULT_DB_PATH)))
-MAX_STORED_SCANS = 250
+# Evidence retention is configurable so operators can keep longer audit trails.
+# The default preserves the historical limit of the last 250 scans per owner.
+MAX_STORED_SCANS = max(1, int(os.environ.get("UNWEB_MAX_STORED_SCANS", "250")))
 MAX_STORED_REPOSITORY_REPORTS = 100
 MAX_AUDIT_EVENTS_PER_OWNER = 1000
 

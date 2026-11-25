@@ -1,7 +1,38 @@
 """URL checks are defence-in-depth; public deployments also need network egress controls."""
 import ipaddress
+import os
 import socket
 from urllib.parse import urlsplit, urlunsplit
+
+# Bounded DNS resolution: a slow or blackholed nameserver for an attacker-chosen
+# hostname must not tie up the thread pool that serves unrelated requests.
+DNS_TIMEOUT_SECONDS = float(os.environ.get("UNWEB_DNS_TIMEOUT_SECONDS", "5"))
+
+
+def _resolve(host: str, port: int) -> list:
+    """getaddrinfo with a wall-clock bound. The underlying C call cannot be
+    interrupted mid-flight, so run it on a daemon thread and abandon (rather
+    than block) if it exceeds the timeout."""
+    import threading
+
+    result: list = []
+    error: list = []
+
+    def worker() -> None:
+        try:
+            result.extend(socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+        except OSError as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(DNS_TIMEOUT_SECONDS)
+    if thread.is_alive():
+        raise URLRejected("Hostname resolution timed out.")
+    if error:
+        raise URLRejected("Hostname could not be resolved.") from error[0]
+    return result
+
 
 class URLRejected(ValueError):
     pass
@@ -33,7 +64,9 @@ def normalize_url(raw: str) -> str:
     if ip is not None:
         if not ip.is_global:
             raise URLRejected("Private, local, reserved, or non-public IP destinations are blocked.")
-    elif not all(part and len(part) <= 63 for part in host.split(".")):
+    elif ":" not in host and not all(part and len(part) <= 63 for part in host.split(".")):
+        # Hostnames with colons are bracketed IPv6 literals handled above; label
+        # checks apply only to dotted DNS names.
         raise URLRejected("Invalid hostname.")
     netloc = f"[{host}]" if ":" in host and not host.startswith("[") else host
     if port is not None:
@@ -49,10 +82,7 @@ def validate_resolved_addresses(url: str) -> list[str]:
         ip = ipaddress.ip_address(host)
         addresses = [str(ip)]
     except ValueError:
-        try:
-            records = socket.getaddrinfo(host, p.port or (443 if p.scheme == "https" else 80), type=socket.SOCK_STREAM)
-        except OSError as exc:
-            raise URLRejected("Hostname could not be resolved.") from exc
+        records = _resolve(host, p.port or (443 if p.scheme == "https" else 80))
         addresses = sorted({r[4][0].split("%")[0] for r in records})
     if not addresses:
         raise URLRejected("Hostname resolved to no addresses.")
