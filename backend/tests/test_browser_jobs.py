@@ -10,6 +10,71 @@ def configure_database(monkeypatch, tmp_path):
     browser_jobs.initialize()
 
 
+def test_stream_trim_uses_pending_minimum(monkeypatch):
+    calls = []
+
+    class FakeRedis:
+        def xpending(self, stream, group):
+            assert stream == browser_jobs.STREAM_NAME
+            assert group == browser_jobs.CONSUMER_GROUP
+            return {"pending": 2, "min": "2-0", "max": "3-0", "consumers": []}
+
+        def xtrim(self, stream, **kwargs):
+            calls.append((stream, kwargs))
+
+    browser_jobs.trim_acknowledged_stream(FakeRedis())
+    assert calls == [(browser_jobs.STREAM_NAME, {"minid": "2-0", "approximate": True})]
+
+
+def test_enqueue_trims_acknowledged_stream_before_append():
+    calls = []
+
+    class FakeRedis:
+        def xpending(self, stream, group):
+            calls.append(("xpending", stream, group))
+            return {"pending": 0, "min": None, "max": None, "consumers": []}
+
+        def xtrim(self, stream, **kwargs):
+            calls.append(("xtrim", stream, kwargs))
+
+        def xadd(self, stream, values):
+            calls.append(("xadd", stream, values))
+
+    browser_jobs.enqueue(FakeRedis(), "job-1")
+    assert [item[0] for item in calls] == ["xpending", "xtrim", "xadd"]
+
+
+def test_terminal_transition_prunes_old_owner_rows(monkeypatch, tmp_path):
+    configure_database(monkeypatch, tmp_path)
+    monkeypatch.setattr(browser_jobs, "MAX_STORED_JOBS_PER_OWNER", 1)
+    first = browser_jobs.create_job("alice", None, "https://example.com/1", ["/"], 40)
+    second = browser_jobs.create_job("alice", None, "https://example.com/2", ["/"], 40)
+
+    assert browser_jobs.cancel_job(first["job_id"], "alice") == "cancelled"
+    assert browser_jobs.cancel_job(second["job_id"], "alice") == "cancelled"
+    assert browser_jobs.get_job(first["job_id"], "alice") is None
+    assert browser_jobs.get_job(second["job_id"], "alice") is not None
+
+
+def test_pending_browser_jobs_are_bounded_per_owner(monkeypatch, tmp_path):
+    configure_database(monkeypatch, tmp_path)
+    monkeypatch.setattr(browser_jobs, "MAX_PENDING_JOBS_PER_OWNER", 1)
+
+    first = browser_jobs.create_job(
+        "alice", "target-a", "https://example.com/app", ["/app"], 40
+    )
+    with pytest.raises(browser_jobs.BrowserJobCapacityError):
+        browser_jobs.create_job(
+            "alice", "target-a", "https://example.com/app", ["/app"], 40
+        )
+
+    assert browser_jobs.cancel_job(first["job_id"], "alice") == "cancelled"
+    second = browser_jobs.create_job(
+        "alice", "target-a", "https://example.com/app", ["/app"], 40
+    )
+    assert second["status"] == "queued"
+
+
 def test_browser_jobs_are_owner_scoped_and_store_results(monkeypatch, tmp_path):
     configure_database(monkeypatch, tmp_path)
     job = browser_jobs.create_job(

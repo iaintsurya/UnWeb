@@ -4,6 +4,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
+
 import pytest
 
 from app import database, main
@@ -250,6 +251,28 @@ def test_github_repository_scan_requires_explicit_authorisation():
     assert response.json()["detail"]["code"] == "repository_authorisation_required"
 
 
+def test_github_repository_scan_fails_closed_when_shared_rate_limit_store_is_unavailable(monkeypatch):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    class UnavailableLimiter:
+        def check(self, key):
+            raise RedisConnectionError("redis unavailable")
+
+    monkeypatch.setattr(main, "REPOSITORY_SCAN_LIMITER", UnavailableLimiter())
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/github-repository-scans",
+            json={
+                "repository_url": "https://github.com/owner/repo",
+                "authorised": True,
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"]["code"] == "rate_limit_store_unavailable"
+
+
 def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "github-repository-api.sqlite3")
     async def fake_fetch(repository_url, ref, destination):
@@ -263,7 +286,6 @@ def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkey
             "archive_bytes": len(make_repository_zip()),
         }
 
-    from pathlib import Path
     monkeypatch.setattr(main, "fetch_github_repository_archive", fake_fetch)
     monkeypatch.setattr(main, "REPOSITORY_SCAN_LIMITER", SlidingWindowLimiter(5, 60))
     with TestClient(main.app) as client:
@@ -420,7 +442,8 @@ def test_scan_history_and_detail_are_isolated_by_authenticated_user(tmp_path, mo
     async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
         return make_result()
     monkeypatch.setattr(main, "scan_site", fake_scan_site)
-    headers = lambda user: {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
+    def headers(user):
+        return {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
     with TestClient(main.app) as client:
         created = client.post("/api/scans", json={"url":"https://example.com/", "authorised":True}, headers=headers("alice"))
         assert created.status_code == 200
@@ -463,7 +486,8 @@ def test_scan_rate_limit_is_scoped_to_authenticated_user(tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(main, "scan_site", fake_scan_site)
-    headers = lambda user: {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
+    def headers(user):
+        return {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
     with TestClient(main.app) as client:
         alice_first = client.post("/api/scans", json={"url":"https://example.com/a", "authorised":True}, headers=headers("alice"))
         alice_second = client.post("/api/scans", json={"url":"https://example.com/b", "authorised":True}, headers=headers("alice"))
@@ -691,6 +715,35 @@ def test_auth_middleware_only_exempts_exact_health_routes(monkeypatch):
     assert live.status_code == 200
     assert ready.status_code == 200
     assert lookalike.status_code == 401
+
+
+def test_browser_job_queue_capacity_is_reported_as_429(monkeypatch):
+    class FakeRedis:
+        def ping(self):
+            return True
+
+    monkeypatch.setattr(main, "REDIS_CLIENT", FakeRedis())
+    monkeypatch.setattr(main, "_configure_rate_limiters", lambda client: None)
+    monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(10, 60))
+    monkeypatch.setattr(main, "_enforce_verified_target", lambda payload, owner_id: None)
+
+    def reject_job(*args, **kwargs):
+        raise main.browser_jobs.BrowserJobCapacityError("queue full")
+
+    monkeypatch.setattr(main.browser_jobs, "create_job", reject_job)
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/browser-jobs",
+            json={
+                "url": "https://example.com/",
+                "target_id": "target-1",
+                "authorised": True,
+            },
+        )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"]["code"] == "browser_queue_capacity_reached"
 
 
 def test_browser_worker_health_reports_missing_configuration(monkeypatch):

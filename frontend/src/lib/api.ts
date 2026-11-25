@@ -8,11 +8,16 @@ type ApiErrorPayload = {
   detail?: string | { message?: string };
 };
 
+export function resolveApiUrl(path: string, baseUrl = API_BASE_URL): string {
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${baseUrl}${path}`;
+}
+
 export async function apiRequest<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, init);
+  const response = await fetch(resolveApiUrl(path), init);
   const payload: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {

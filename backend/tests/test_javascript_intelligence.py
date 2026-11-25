@@ -59,6 +59,18 @@ const x = 1;
     }
 
 
+def test_source_map_reference_redacts_credentials_and_query_values():
+    result = analyze_javascript(
+        "https://example.com/app.js?token=outer-secret",
+        "//# sourceMappingURL=https://user:p@cdn.example/app.js.map?token=map-secret#fragment\n",
+    )
+
+    assert result["url"] == "https://example.com/app.js?token=outer-secret"
+    assert result["source_map_references"] == [
+        {"reference": "https://cdn.example/app.js.map", "line": 1}
+    ]
+
+
 def test_js_analysis_reports_basic_size_and_limitations():
     body = "const x = 1;\nconst y = 2;"
     result = analyze_javascript("https://example.com/app.js", body)

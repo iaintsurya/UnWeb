@@ -1,14 +1,14 @@
 # Testing
 
-Run the backend suite with `cd backend && python -m pytest -q`.
+Run the backend suite with `cd backend && python -m pytest -q`. CI installs `backend/requirements-dev.txt` and runs the same static gate. Run it locally from the repository root with `backend/.venv/bin/ruff check backend/app backend/tests`; `ruff.toml` selects syntax, import, and undefined-name errors while existing browser cleanup catches remain intentionally explicit.
 
 ## Current regression coverage
 
 Backend tests cover URL normalisation and private-address rejection, mocked breadth-first crawling, page limits, observed sitemap edges, same-origin redirect boundaries, IP-pinned DNS/Host/SNI behavior, response content types, cross-page assets/scripts, SQLite persistence/retention, sliding-window rate limits, API creation/history/lookup and 429 responses, HTML extraction, passive security-header evidence (including ineffective HSTS/nosniff/CSP values, wildcard CORS context, permissive script-source directives, and redacted technology-version disclosures), and JavaScript comment-aware route/library/source-map evidence. Reconstruction tests cover output structure, safe URL handling, HTML escaping, removed active content, and empty states.
 
-The optional browser-worker suite tests HTTPS-only target intake, CONNECT authority parsing, target-origin restrictions, proxy pinning to a validated IP literal, query-string redaction, same-origin request handling, cleanup behavior, and the explicit isolation acknowledgement. These tests use local loopback fixtures and fakes; they do not launch Chromium or send requests to third-party websites.
+The optional browser-worker suite tests HTTPS-only target intake, CONNECT authority parsing, target-origin restrictions, proxy pinning to a validated IP literal, query-string redaction, same-origin request handling, nested encoded path-scope rejection, empty-scope rejection, cleanup behavior, and the explicit isolation acknowledgement. These tests use local loopback fixtures and fakes; they do not launch Chromium or send requests to third-party websites.
 
-Run the frontend checks with `cd frontend && npm ci && npm run build && npm test`. Vitest tests the shared API request helper's success and error handling plus sitemap graph empty/self-link rendering; the build runs TypeScript's strict project checks before bundling.
+Run the frontend checks with `cd frontend && npm ci && npm run build && npm test`. Vitest tests the App's empty initial state, shared API request helper's success/error handling and absolute/relative base URL resolution, BrowserEvidence, sitemap graph empty/self-link rendering, SARIF conversion and correlation logic; the build runs TypeScript's strict project checks before bundling. The full ZIP/GitHub upload interaction still lacks a dedicated browser-level component test.
 
 ## Repository-analysis regression coverage
 
