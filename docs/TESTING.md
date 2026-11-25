@@ -1,6 +1,6 @@
 # Testing
 
-Run the backend suite with `cd backend && python -m pytest -q`.
+Run the backend suite with `cd backend && python -m pytest -q`. Run the repository static Python gate from the root with `backend/.venv/bin/ruff check backend/app backend/tests`; `ruff.toml` selects syntax, import, and undefined-name errors while existing browser cleanup catches remain intentionally explicit.
 
 ## Current regression coverage
 

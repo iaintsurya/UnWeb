@@ -133,7 +133,7 @@ def test_fetch_github_archive_rejects_redirect_to_unapproved_host(tmp_path, monk
 
 def test_fetch_github_archive_enforces_streamed_size_limit(tmp_path, monkeypatch):
     def handler(request):
-        if request.url.path == f"/repos/owner/repo/commits/main":
+        if request.url.path == "/repos/owner/repo/commits/main":
             return httpx.Response(200, json={"sha": COMMIT_SHA})
         if request.url.path == f"/repos/owner/repo/zipball/{COMMIT_SHA}":
             return httpx.Response(

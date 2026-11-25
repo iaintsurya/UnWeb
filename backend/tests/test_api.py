@@ -4,6 +4,7 @@ import io
 import json
 import zipfile
 from pathlib import Path
+
 import pytest
 
 from app import database, main
@@ -285,7 +286,6 @@ def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkey
             "archive_bytes": len(make_repository_zip()),
         }
 
-    from pathlib import Path
     monkeypatch.setattr(main, "fetch_github_repository_archive", fake_fetch)
     monkeypatch.setattr(main, "REPOSITORY_SCAN_LIMITER", SlidingWindowLimiter(5, 60))
     with TestClient(main.app) as client:
@@ -442,7 +442,8 @@ def test_scan_history_and_detail_are_isolated_by_authenticated_user(tmp_path, mo
     async def fake_scan_site(url, max_pages, include_reconstruction, scope_paths=None):
         return make_result()
     monkeypatch.setattr(main, "scan_site", fake_scan_site)
-    headers = lambda user: {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
+    def headers(user):
+        return {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
     with TestClient(main.app) as client:
         created = client.post("/api/scans", json={"url":"https://example.com/", "authorised":True}, headers=headers("alice"))
         assert created.status_code == 200
@@ -485,7 +486,8 @@ def test_scan_rate_limit_is_scoped_to_authenticated_user(tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(main, "scan_site", fake_scan_site)
-    headers = lambda user: {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
+    def headers(user):
+        return {"X-UnWeb-Auth-Token": "test-proxy-secret", "X-UnWeb-Auth-User": user}
     with TestClient(main.app) as client:
         alice_first = client.post("/api/scans", json={"url":"https://example.com/a", "authorised":True}, headers=headers("alice"))
         alice_second = client.post("/api/scans", json={"url":"https://example.com/b", "authorised":True}, headers=headers("alice"))

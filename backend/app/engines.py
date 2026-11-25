@@ -28,16 +28,21 @@ def analyze_html(base_url: str, html: str):
     stylesheets, images, assets = [], [], []
     for tag in soup.find_all("link", href=True):
         u = absolute(tag["href"])
-        if not u: continue
+        if not u:
+            continue
         rel = " ".join(str(x).lower() for x in (tag.get("rel") or []))
         if "stylesheet" in rel:
-            stylesheets.append(u); assets.append({"kind":"stylesheet","url":u})
+            stylesheets.append(u)
+            assets.append({"kind": "stylesheet", "url": u})
         elif "icon" in rel:
-            assets.append({"kind":"icon","url":u})
-    for u in scripts: assets.append({"kind":"script","url":u})
+            assets.append({"kind": "icon", "url": u})
+    for u in scripts:
+        assets.append({"kind": "script", "url": u})
     for tag in soup.find_all("img", src=True):
         u = absolute(tag["src"])
-        if u: images.append(u); assets.append({"kind":"image","url":u})
+        if u:
+            images.append(u)
+            assets.append({"kind": "image", "url": u})
     page = PageSummary(url=base_url, title=title, links=links, scripts=scripts,
                        stylesheets=list(dict.fromkeys(stylesheets)), images=list(dict.fromkeys(images)),
                        metadata=metadata)
@@ -49,7 +54,8 @@ def analyze_html(base_url: str, html: str):
         ("WordPress","high","WordPress asset path observed.", ("wp-content/" in low or "wp-includes/" in low)),
         ("Vite dev client","high","@vite/client reference observed.", ("@vite/client" in low)),
     ]:
-        if condition: tech.append({"name":name,"confidence":confidence,"evidence":evidence})
+        if condition:
+            tech.append({"name": name, "confidence": confidence, "evidence": evidence})
     return page, assets, tech
 
 def _cookie_observations(headers: dict[str, str]) -> list[Finding]:

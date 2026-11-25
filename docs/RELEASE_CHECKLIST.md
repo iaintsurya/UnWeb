@@ -6,7 +6,7 @@ Use this checklist for every release. A checked local test does not prove that e
 
 - [ ] Backend tests pass under the supported Python runtime.
 - [ ] Frontend build and tests pass under the declared Node engine.
-- [ ] `python -m compileall` and `git diff --check` pass.
+- [ ] `python -m compileall`, `ruff check`, and `git diff --check` pass.
 - [ ] `npm audit` and `pip-audit` are reviewed.
 - [ ] CodeQL and all required GitHub checks are green on the release commit.
 - [ ] Production Compose configuration validates.
