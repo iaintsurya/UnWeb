@@ -96,24 +96,25 @@ jobs:
         run: |
           set -eu
           compose="docker compose --env-file .env.production.example -f docker-compose.production.yml"
+          deadline=$(( $(date +%s) + 90 ))
           frontend_ready=0
-          for attempt in $(seq 1 30); do
+          while [ "$(date +%s)" -lt "$deadline" ]; do
             if $compose exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/; then
               frontend_ready=1
               break
             fi
-            echo "Frontend not ready yet (attempt $attempt/30)"
+            echo "Frontend not ready yet; retrying before shared deadline"
             sleep 2
           done
           test "$frontend_ready" -eq 1
 
           api_ready=0
-          for attempt in $(seq 1 30); do
+          while [ "$(date +%s)" -lt "$deadline" ]; do
             if $compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).read()"; then
               api_ready=1
               break
             fi
-            echo "API not ready yet (attempt $attempt/30)"
+            echo "API not ready yet; retrying before shared deadline"
             sleep 2
           done
           test "$api_ready" -eq 1
