@@ -1,6 +1,6 @@
 import html
 import json
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Tag
 
@@ -50,7 +50,11 @@ def _absolute_http_url(base_url: str, raw_url: object) -> str | None:
             return None
         if parts.username is not None or parts.password is not None:
             return None
-        return absolute
+        host = parts.hostname
+        netloc = f"[{host}]" if ":" in host else host
+        if parts.port is not None:
+            netloc += f":{parts.port}"
+        return urlunsplit((parts.scheme, netloc, parts.path or "/", "", ""))
     except ValueError:
         return None
 

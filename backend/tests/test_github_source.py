@@ -78,6 +78,37 @@ def test_fetch_github_archive_resolves_default_branch_and_pins_commit(tmp_path, 
     assert any(COMMIT_SHA in url for url in requested)
 
 
+def test_fetch_github_archive_rejects_same_repo_redirect_to_different_commit(tmp_path, monkeypatch):
+    other_commit = "f" * 40
+
+    def handler(request):
+        if request.url.path == "/repos/owner/repo/commits/main":
+            return httpx.Response(200, json={"sha": COMMIT_SHA})
+        if request.url.path == f"/repos/owner/repo/zipball/{COMMIT_SHA}":
+            return httpx.Response(
+                302,
+                headers={
+                    "location": f"https://codeload.github.com/owner/repo/legacy.zip/{other_commit}"
+                },
+            )
+        if request.url.host == "codeload.github.com":
+            return httpx.Response(200, content=b"not-a-real-but-nonempty-archive")
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        github_source.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: original_client(*args, transport=transport, **kwargs),
+    )
+    with pytest.raises(github_source.GitHubSourceError) as error:
+        asyncio.run(github_source.fetch_github_repository_archive(
+            "https://github.com/owner/repo", "main", tmp_path / "repository.zip"
+        ))
+    assert error.value.code == "github_archive_redirect_rejected"
+
+
 def test_fetch_github_archive_rejects_redirect_to_unapproved_host(tmp_path, monkeypatch):
     def handler(request):
         if request.url.path == "/repos/owner/repo/commits/main":

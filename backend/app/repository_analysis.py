@@ -186,6 +186,26 @@ def _redact_evidence(line: str) -> str:
         lambda match: f"{match.group('key')}=[REDACTED]", line
     )
     safe = re.sub(
+        r"(?i)(https?://)[^/\s'\"@]+@",
+        r"\1[REDACTED]@",
+        safe,
+    )
+    safe = re.sub(
+        r"(?i)([?&](?:token|access[_-]?token|id[_-]?token|refresh[_-]?token|api[_-]?key|secret|password|passwd|auth|signature|sig|code|session(?:id)?|jwt)=)[^&#\s'\"<>]+",
+        r"\1[REDACTED]",
+        safe,
+    )
+    safe = re.sub(
+        r"(?i)(\bcookie:\s*[^=;\s]+=)[^;\s]+",
+        r"\1[REDACTED]",
+        safe,
+    )
+    safe = re.sub(
+        r"\b(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,})\b",
+        "[REDACTED_JWT]",
+        safe,
+    )
+    safe = re.sub(
         r"(?i)\b(Bearer\s+)[A-Za-z0-9._~+/-]{8,}",
         r"\1[REDACTED]",
         safe,

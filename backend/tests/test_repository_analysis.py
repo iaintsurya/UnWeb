@@ -47,6 +47,22 @@ def test_detects_security_indicators_without_exposing_secret_values(tmp_path):
     assert "value has been redacted" in rendered
 
 
+def test_redacts_query_tokens_from_finding_evidence(tmp_path):
+    secret = "super-secret-reset-value"
+    write_file(
+        tmp_path,
+        "src/client.py",
+        f"requests.get('https://example.test/reset?token={secret}', verify=False)\n",
+    )
+
+    report = analyse_repository(tmp_path)
+    rendered = json.dumps(report.to_dict())
+
+    assert "tls-certificate-verification-disabled" in {item.id for item in report.findings}
+    assert secret not in rendered
+    assert "token=[REDACTED]" in rendered
+
+
 def test_detects_dynamic_sql_but_not_parameterised_queries(tmp_path):
     write_file(
         tmp_path,

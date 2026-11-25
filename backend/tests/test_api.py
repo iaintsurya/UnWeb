@@ -250,6 +250,28 @@ def test_github_repository_scan_requires_explicit_authorisation():
     assert response.json()["detail"]["code"] == "repository_authorisation_required"
 
 
+def test_github_repository_scan_fails_closed_when_shared_rate_limit_store_is_unavailable(monkeypatch):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    class UnavailableLimiter:
+        def check(self, key):
+            raise RedisConnectionError("redis unavailable")
+
+    monkeypatch.setattr(main, "REPOSITORY_SCAN_LIMITER", UnavailableLimiter())
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/github-repository-scans",
+            json={
+                "repository_url": "https://github.com/owner/repo",
+                "authorised": True,
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"]["code"] == "rate_limit_store_unavailable"
+
+
 def test_github_repository_scan_returns_report_pinned_to_commit(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "github-repository-api.sqlite3")
     async def fake_fetch(repository_url, ref, destination):
@@ -691,6 +713,35 @@ def test_auth_middleware_only_exempts_exact_health_routes(monkeypatch):
     assert live.status_code == 200
     assert ready.status_code == 200
     assert lookalike.status_code == 401
+
+
+def test_browser_job_queue_capacity_is_reported_as_429(monkeypatch):
+    class FakeRedis:
+        def ping(self):
+            return True
+
+    monkeypatch.setattr(main, "REDIS_CLIENT", FakeRedis())
+    monkeypatch.setattr(main, "_configure_rate_limiters", lambda client: None)
+    monkeypatch.setattr(main, "SCAN_RATE_LIMITER", SlidingWindowLimiter(10, 60))
+    monkeypatch.setattr(main, "_enforce_verified_target", lambda payload, owner_id: None)
+
+    def reject_job(*args, **kwargs):
+        raise main.browser_jobs.BrowserJobCapacityError("queue full")
+
+    monkeypatch.setattr(main.browser_jobs, "create_job", reject_job)
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/browser-jobs",
+            json={
+                "url": "https://example.com/",
+                "target_id": "target-1",
+                "authorised": True,
+            },
+        )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"]["code"] == "browser_queue_capacity_reached"
 
 
 def test_browser_worker_health_reports_missing_configuration(monkeypatch):

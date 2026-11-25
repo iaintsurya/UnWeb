@@ -503,7 +503,7 @@ async def create_github_repository_scan(payload: GitHubRepositoryScanRequest, re
             },
         )
 
-    retry_after = await asyncio.to_thread(REPOSITORY_SCAN_LIMITER.check, request.state.user_id)
+    retry_after = await _check_rate_limit(REPOSITORY_SCAN_LIMITER, request.state.user_id)
     if retry_after:
         raise HTTPException(
             429,
@@ -697,9 +697,13 @@ async def create_browser_job(payload: BrowserJobRequest, request: Request):
         raise HTTPException(429, detail={"code": "browser_job_rate_limited",
             "message": "Too many browser jobs for this account."},
             headers={"Retry-After": str(max(1, int(retry_after + 0.999)))})
-    job = await asyncio.to_thread(browser_jobs.create_job, request.state.user_id,
-                                  payload.target_id, normalized_url, scope_paths,
-                                  payload.max_requests)
+    try:
+        job = await asyncio.to_thread(browser_jobs.create_job, request.state.user_id,
+                                      payload.target_id, normalized_url, scope_paths,
+                                      payload.max_requests)
+    except browser_jobs.BrowserJobCapacityError as exc:
+        raise HTTPException(429, detail={"code": "browser_queue_capacity_reached",
+            "message": str(exc)}, headers={"Retry-After": "5"}) from exc
     try:
         await asyncio.to_thread(browser_jobs.enqueue, REDIS_CLIENT, job["job_id"])
     except RedisError as exc:

@@ -10,6 +10,41 @@ def configure_database(monkeypatch, tmp_path):
     browser_jobs.initialize()
 
 
+def test_stream_trim_uses_pending_minimum(monkeypatch):
+    calls = []
+
+    class FakeRedis:
+        def xpending(self, stream, group):
+            assert stream == browser_jobs.STREAM_NAME
+            assert group == browser_jobs.CONSUMER_GROUP
+            return {"pending": 2, "min": "2-0", "max": "3-0", "consumers": []}
+
+        def xtrim(self, stream, **kwargs):
+            calls.append((stream, kwargs))
+
+    browser_jobs.trim_acknowledged_stream(FakeRedis())
+    assert calls == [(browser_jobs.STREAM_NAME, {"minid": "2-0", "approximate": True})]
+
+
+def test_pending_browser_jobs_are_bounded_per_owner(monkeypatch, tmp_path):
+    configure_database(monkeypatch, tmp_path)
+    monkeypatch.setattr(browser_jobs, "MAX_PENDING_JOBS_PER_OWNER", 1)
+
+    first = browser_jobs.create_job(
+        "alice", "target-a", "https://example.com/app", ["/app"], 40
+    )
+    with pytest.raises(browser_jobs.BrowserJobCapacityError):
+        browser_jobs.create_job(
+            "alice", "target-a", "https://example.com/app", ["/app"], 40
+        )
+
+    assert browser_jobs.cancel_job(first["job_id"], "alice") == "cancelled"
+    second = browser_jobs.create_job(
+        "alice", "target-a", "https://example.com/app", ["/app"], 40
+    )
+    assert second["status"] == "queued"
+
+
 def test_browser_jobs_are_owner_scoped_and_store_results(monkeypatch, tmp_path):
     configure_database(monkeypatch, tmp_path)
     job = browser_jobs.create_job(

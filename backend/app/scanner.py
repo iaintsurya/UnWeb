@@ -8,7 +8,7 @@ from collections import deque
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlsplit, urlunsplit, urldefrag, unquote
 
-from .models import ScanResult
+from .models import PageEdge, ScanResult
 from .finding_schema import website_security_findings
 from .url_policy import normalize_url, validate_resolved_addresses, URLRejected
 from .engines import analyze_html, analyze_security, analyze_javascript
@@ -147,13 +147,47 @@ def _response_headers_for_analysis(headers) -> dict[str, str]:
     return result
 
 
+def _public_url(raw_url: str) -> str:
+    """Return a display/persistence-safe URL without credentials or query data."""
+    try:
+        parts = urlsplit(str(raw_url))
+        if parts.scheme.lower() not in {"http", "https"} or not parts.hostname:
+            return ""
+        host = parts.hostname
+        netloc = f"[{host}]" if ":" in host else host
+        if parts.port is not None:
+            netloc += f":{parts.port}"
+        return urlunsplit((parts.scheme.lower(), netloc, parts.path or "/", "", ""))
+    except (TypeError, ValueError):
+        return ""
+
+
+def _public_url_list(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(safe for value in values if (safe := _public_url(value))))
+
+
+_SENSITIVE_PUBLIC_HEADER = re.compile(
+    r"(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|token|api[-_]?key|credential)",
+    re.IGNORECASE,
+)
+
+
 def _public_response_headers(headers: dict[str, str]) -> dict[str, str]:
-    """Return safe response metadata; Set-Cookie values are secrets, not evidence."""
-    return {
-        key.lower(): value
-        for key, value in headers.items()
-        if key.lower() not in {"set-cookie", "__unweb_set_cookie_headers"}
-    }
+    """Return response metadata without credentials or query-bearing redirects."""
+    result: dict[str, str] = {}
+    for raw_key, raw_value in headers.items():
+        key = str(raw_key).lower()
+        if key == "__unweb_set_cookie_headers" or _SENSITIVE_PUBLIC_HEADER.search(key):
+            continue
+        value = str(raw_value)
+        if key in {"location", "content-location"}:
+            safe_url = _public_url(value)
+            if safe_url:
+                value = safe_url
+            else:
+                continue
+        result[key] = value
+    return result
 
 
 def _is_html(headers: dict[str, str]) -> bool:
@@ -376,9 +410,11 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
             })
 
     reconstruction = None
+    public_final_url = _public_url(final_url) or "/"
+    public_requested_url = _public_url(start) or public_final_url
     if include_reconstruction:
         from .rebuild import make_reconstruction
-        reconstruction = make_reconstruction(final_url, html)
+        reconstruction = make_reconstruction(public_final_url, html)
 
     scanned_page_urls = {scanned_page.url for scanned_page in pages}
     edges = [
@@ -386,11 +422,43 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         if source in scanned_page_urls and target in scanned_page_urls
     ]
 
+    public_page_urls: dict[str, str] = {}
+    for scanned_page in pages:
+        public_url = _public_url(scanned_page.url) or public_final_url
+        public_page_urls[scanned_page.url] = public_url
+        scanned_page.url = public_url
+        scanned_page.links = _public_url_list(scanned_page.links)
+        scanned_page.scripts = _public_url_list(scanned_page.scripts)
+        scanned_page.stylesheets = _public_url_list(scanned_page.stylesheets)
+        scanned_page.images = _public_url_list(scanned_page.images)
+
+    public_assets = []
+    for asset in assets:
+        public_url = _public_url(asset.get("url", ""))
+        if public_url:
+            public_assets.append({"kind": str(asset.get("kind", "asset")), "url": public_url})
+    assets = list(dict.fromkeys((item["kind"], item["url"]) for item in public_assets))
+    assets = [{"kind": kind, "url": url} for kind, url in assets]
+
+    public_js = []
+    for item in js:
+        copy = dict(item)
+        if "url" in copy:
+            copy["url"] = _public_url(str(copy["url"]))
+        if copy.get("url"):
+            public_js.append(copy)
+    js = public_js
+    public_edges = [
+        PageEdge(source=public_page_urls[source], target=public_page_urls[target])
+        for source, target in edges
+        if public_page_urls.get(source) and public_page_urls.get(target)
+    ]
+
     scanned_at = datetime.now(timezone.utc).isoformat()
     return ScanResult(
         id=str(uuid.uuid4()),
-        requested_url=start,
-        final_url=final_url,
+        requested_url=public_requested_url,
+        final_url=public_final_url,
         scope_paths=scope_paths,
         status_code=status,
         scanned_at=scanned_at,
@@ -401,10 +469,10 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
         assets=assets,
         page=page,
         pages=pages,
-        edges=[{"source": source, "target": target} for source, target in edges],
+        edges=public_edges,
         findings=findings,
         security_findings=website_security_findings(
-            findings, final_url, scanner_version="0.2.0", observed_at=scanned_at
+            findings, public_final_url, scanner_version="0.2.0", observed_at=scanned_at
         ),
         js_analysis=js,
         notes=[

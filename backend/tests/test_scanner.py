@@ -264,6 +264,45 @@ def test_scan_result_redacts_set_cookie_values_from_persistable_headers(monkeypa
     assert any(item.id == "cookie-sessionid-missing-secure" for item in result.findings)
 
 
+def test_scan_result_redacts_query_strings_and_sensitive_headers(monkeypatch):
+    import json
+
+    body = (
+        b'<html><head><title>Home</title><script src="/app.js?token=script-secret"></script>'
+        b'</head><body><a href="/reset?token=reset-secret">Reset</a>'
+        b'<img src="/logo.png?api_key=image-secret"></body></html>'
+    )
+
+    async def fake_safe_fetch(url: str, max_bytes: int = scanner.MAX_HTML, allowed_origin=None, allowed_paths=None):
+        return (
+            url,
+            200,
+            {
+                "content-type": "text/html",
+                "authorization": "Bearer header-secret",
+                "x-api-key": "header-api-secret",
+                "location": "https://example.com/redirect?token=location-secret",
+            },
+            body,
+        )
+
+    monkeypatch.setattr(scanner, "safe_fetch", fake_safe_fetch)
+    result = asyncio.run(scanner.scan_site("https://example.com/start?token=start-secret", max_pages=1, include_reconstruction=True))
+    serialized = json.dumps(result.model_dump())
+
+    assert result.requested_url == "https://example.com/start"
+    assert result.final_url == "https://example.com/start"
+    assert all("?" not in url for url in result.page.links + result.page.scripts + result.page.images)
+    assert all("?" not in asset["url"] for asset in result.assets)
+    assert "authorization" not in result.headers
+    assert "x-api-key" not in result.headers
+    assert "?token=location-secret" not in serialized
+    assert "script-secret" not in serialized
+    assert "reset-secret" not in serialized
+    assert "image-secret" not in serialized
+    assert "start-secret" not in serialized
+
+
 def test_scope_prefixes_are_segment_aware_and_reject_traversal():
     scopes = scanner.normalize_scope_paths(["/app", "/admin/"])
     assert scanner._path_in_scope("https://example.com/app", scopes)

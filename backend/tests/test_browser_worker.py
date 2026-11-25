@@ -117,6 +117,27 @@ def test_proxy_does_not_connect_when_dns_policy_rejects(monkeypatch):
     assert opened == []
 
 
+def test_browser_path_scope_rejects_nested_encoded_traversal_and_separators():
+    assert not browser_worker._path_in_scope(
+        "https://example.com/app/%252e%252e/admin",
+        ["/app"],
+    )
+    assert not browser_worker._path_in_scope(
+        "https://example.com/app/%252fadmin",
+        ["/app"],
+    )
+
+
+def test_browser_render_rejects_an_explicit_empty_scope():
+    with pytest.raises(URLRejected, match="between 1 and 20"):
+        asyncio.run(
+            browser_worker.run_browser_intelligence(
+                "https://example.com/app",
+                scope_paths=[],
+            )
+        )
+
+
 def test_browser_render_uses_sandbox_proxy_and_blocks_other_origins(monkeypatch):
     launch_options = {}
     context_options = {}

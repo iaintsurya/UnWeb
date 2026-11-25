@@ -186,13 +186,17 @@ async def fetch_github_repository_archive(
         location = archive_response.headers.get("location", "")
         parsed_location = urlsplit(location)
         expected_prefix = f"/{owner}/{repository}/"
+        expected_archive_path = f"/{owner}/{repository}/legacy.zip/{commit}"
         if (
             parsed_location.scheme != "https"
             or parsed_location.hostname != GITHUB_ARCHIVE_HOST
             or parsed_location.port not in (None, 443)
             or parsed_location.username is not None
             or parsed_location.password is not None
+            or parsed_location.query
+            or parsed_location.fragment
             or not parsed_location.path.startswith(expected_prefix)
+            or parsed_location.path != expected_archive_path
         ):
             raise GitHubSourceError(
                 "github_archive_redirect_rejected",
