@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiRequest } from "./api";
+import { apiRequest, resolveApiUrl } from "./api";
 
 describe("apiRequest", () => {
+  it("does not duplicate an already-resolved API base URL", () => {
+    expect(resolveApiUrl("https://api.example.com/api/scans", "https://api.example.com")).toBe(
+      "https://api.example.com/api/scans",
+    );
+    expect(resolveApiUrl("/api/scans", "https://api.example.com")).toBe(
+      "https://api.example.com/api/scans",
+    );
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();

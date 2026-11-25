@@ -87,13 +87,36 @@ jobs:
         run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
       - name: Build and start production stack
         run: docker compose --env-file .env.production.example -f docker-compose.production.yml up -d --build
-      - name: Verify frontend, API health, and authentication boundary
+      - name: Wait for frontend and API readiness
         run: |
-          docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/
+          set -eu
+          compose="docker compose --env-file .env.production.example -f docker-compose.production.yml"
+          frontend_ready=0
+          for attempt in $(seq 1 30); do
+            if $compose exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/; then
+              frontend_ready=1
+              break
+            fi
+            echo "Frontend not ready yet (attempt $attempt/30)"
+            sleep 2
+          done
+          test "$frontend_ready" -eq 1
+
+          api_ready=0
+          for attempt in $(seq 1 30); do
+            if $compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).read()"; then
+              api_ready=1
+              break
+            fi
+            echo "API not ready yet (attempt $attempt/30)"
+            sleep 2
+          done
+          test "$api_ready" -eq 1
+      - name: Verify authentication boundary
+        run: |
           docker compose --env-file .env.production.example -f docker-compose.production.yml exec -T api python - <<'PY'
           import urllib.request
           import urllib.error
-          urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=5).read()
           request = urllib.request.Request("http://127.0.0.1:8000/api/scans")
           try:
               urllib.request.urlopen(request, timeout=5)

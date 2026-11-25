@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 node_modules/
 dist/
+*.tsbuildinfo
 .env
 *.py[cod]
 
