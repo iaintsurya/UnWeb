@@ -86,18 +86,15 @@ The local CLI supports local directories and bounded user-provided ZIP archives.
 
 ## Finding and evidence model
 
-A common finding is a structured record, not just a label or a scary severity badge. The current contract includes:
-- stable check identifier and category;
-- affected URL, method, parameter or component;
-- observed evidence and source location;
-- validation level (passive, low-impact active, controlled proof, or inconclusive);
-- confidence and severity, kept separate;
-- preconditions and potential impact;
-- concise reproduction steps that remain within the approved scope;
-- remediation recommendation and retest procedure;
-- timestamps, scanner version, scope identifier and request-budget accounting.
+A common finding is a structured record, not just a label or a scary severity badge. The current adapter emits:
+- deterministic finding and check identifiers;
+- source and target identity plus a URL or repository-file location;
+- title, category, evidence, severity, confidence, and controlled validation state;
+- optional impact and preconditions, which remain unset when not established;
+- remediation text and scanner version;
+- an optional observation timestamp and nullable scope identifier.
 
-A suspected issue that has not been safely verified must be labelled as suspected or inconclusive. Do not claim a successful exploit merely because a payload was sent or an unusual response appeared. Avoid storing credentials, session cookies, full personal data, or response bodies unless a specific approved test requires a minimal redacted evidence sample.
+The current record does **not** provide universal reproduction steps, retest procedures, request-budget accounting, reachability, exploitability proof, or a non-null scope identifier. Those are planned or deployment-specific concerns. A suspected issue that has not been safely verified must be labelled as suspected or inconclusive. Do not claim a successful exploit merely because a payload was sent or an unusual response appeared. Avoid storing credentials, session cookies, full personal data, or response bodies unless a specific approved test requires a minimal redacted evidence sample.
 
 ## Planned security coverage
 

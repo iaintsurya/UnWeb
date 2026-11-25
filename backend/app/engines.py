@@ -1,6 +1,6 @@
 import re
 from http.cookies import SimpleCookie
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 from .models import Finding, PageSummary
 
@@ -437,6 +437,26 @@ def _mask_js_comments(body: str) -> str:
     return "".join(chars)
 
 
+def _safe_observed_url(raw_url: str) -> str:
+    value = str(raw_url).strip()
+    if value.lower().startswith("data:"):
+        return "[inline source map omitted]"
+    try:
+        parts = urlsplit(value)
+        if parts.username is not None or parts.password is not None:
+            host = parts.hostname
+            if not host:
+                return ""
+            netloc = f"[{host}]" if ":" in host else host
+            if parts.port is not None:
+                netloc += f":{parts.port}"
+        else:
+            netloc = parts.netloc
+        return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+    except ValueError:
+        return ""
+
+
 def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
     """Extract explainable route, library, and source-map clues from JS."""
     route_pattern = re.compile(r"^/(?:api|v\d+|auth|graphql|admin)(?:/|$)", re.I)
@@ -510,8 +530,11 @@ def analyze_javascript(script_url: str, body: str) -> dict[str, object]:
     source_maps = []
     source_map_pattern = r"(?://#|//@|/\*[#@])\s*sourceMappingURL\s*=\s*([^\s*]+)"
     for match in re.finditer(source_map_pattern, body):
+        reference = _safe_observed_url(match.group(1).strip().rstrip("*/"))
+        if not reference:
+            continue
         source_maps.append({
-            "reference": match.group(1).strip().rstrip("*/"),
+            "reference": reference,
             "line": body.count("\n", 0, match.start()) + 1,
         })
         if len(source_maps) >= 10:

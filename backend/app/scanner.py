@@ -166,6 +166,31 @@ def _public_url_list(values: list[str]) -> list[str]:
     return list(dict.fromkeys(safe for value in values if (safe := _public_url(value))))
 
 
+def _public_metadata(metadata: dict[str, str], base_url: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, raw_value in metadata.items():
+        value = str(raw_value)
+        key_lower = key.lower()
+        is_url_field = any(token in key_lower for token in ("url", "image", "icon", "video", "audio"))
+        if is_url_field or value.lower().startswith(("http://", "https://", "//")):
+            safe_url = _public_url(urljoin(base_url, value))
+            if safe_url:
+                result[key] = safe_url
+            continue
+        result[key] = value
+    return result
+
+
+_URL_IN_HEADER = re.compile(r"https?://[^\s,;>]+", re.IGNORECASE)
+
+
+def _public_header_value(value: str) -> str:
+    return _URL_IN_HEADER.sub(
+        lambda match: _public_url(match.group(0)),
+        value,
+    )
+
+
 _SENSITIVE_PUBLIC_HEADER = re.compile(
     r"(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|token|api[-_]?key|credential)",
     re.IGNORECASE,
@@ -186,6 +211,8 @@ def _public_response_headers(headers: dict[str, str]) -> dict[str, str]:
                 value = safe_url
             else:
                 continue
+        elif key in {"link", "refresh"}:
+            value = _public_header_value(value)
         result[key] = value
     return result
 
@@ -424,13 +451,15 @@ async def scan_site(raw_url: str, max_pages: int = 8, include_reconstruction: bo
 
     public_page_urls: dict[str, str] = {}
     for scanned_page in pages:
-        public_url = _public_url(scanned_page.url) or public_final_url
-        public_page_urls[scanned_page.url] = public_url
+        original_url = scanned_page.url
+        public_url = _public_url(original_url) or public_final_url
+        public_page_urls[original_url] = public_url
         scanned_page.url = public_url
         scanned_page.links = _public_url_list(scanned_page.links)
         scanned_page.scripts = _public_url_list(scanned_page.scripts)
         scanned_page.stylesheets = _public_url_list(scanned_page.stylesheets)
         scanned_page.images = _public_url_list(scanned_page.images)
+        scanned_page.metadata = _public_metadata(scanned_page.metadata, original_url)
 
     public_assets = []
     for asset in assets:

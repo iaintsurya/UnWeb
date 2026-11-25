@@ -23,6 +23,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _prune_terminal_jobs(connection: Any, owner_id: str) -> None:
+    connection.execute(
+        """DELETE FROM browser_jobs
+        WHERE owner_id = ? AND status IN ('completed', 'failed', 'cancelled')
+        AND job_id NOT IN (
+            SELECT job_id FROM browser_jobs
+            WHERE owner_id = ? AND status IN ('completed', 'failed', 'cancelled')
+            ORDER BY COALESCE(finished_at, updated_at) DESC, job_id DESC
+            LIMIT ?
+        )""",
+        (owner_id, owner_id, MAX_STORED_JOBS_PER_OWNER),
+    )
+
+
+def _prune_terminal_job_owner(connection: Any, job_id: str) -> None:
+    row = connection.execute(
+        "SELECT owner_id FROM browser_jobs WHERE job_id = ?",
+        (job_id,),
+    ).fetchone()
+    if row is not None:
+        _prune_terminal_jobs(connection, str(row["owner_id"]))
+
+
 def initialize() -> None:
     with database._connection() as connection:
         connection.execute(
@@ -79,21 +102,12 @@ def create_job(owner_id: str, target_id: str | None, target_url: str,
             (job_id, owner_id, target_id, target_url,
              json.dumps(scope_paths), max_requests, now, now),
         )
-        connection.execute(
-            """DELETE FROM browser_jobs
-            WHERE owner_id = ? AND status IN ('completed', 'failed', 'cancelled')
-            AND job_id NOT IN (
-                SELECT job_id FROM browser_jobs
-                WHERE owner_id = ? AND status IN ('completed', 'failed', 'cancelled')
-                ORDER BY COALESCE(finished_at, updated_at) DESC, job_id DESC
-                LIMIT ?
-            )""",
-            (owner_id, owner_id, MAX_STORED_JOBS_PER_OWNER),
-        )
+        _prune_terminal_jobs(connection, owner_id)
     return get_job(job_id, owner_id)  # type: ignore[return-value]
 
 
 def enqueue(client: Any, job_id: str) -> None:
+    trim_acknowledged_stream(client)
     client.xadd(STREAM_NAME, {"job_id": job_id})
 
 
@@ -179,11 +193,13 @@ def cancel_job(job_id: str, owner_id: str) -> str | None:
         if row is None:
             return None
         if row["status"] == "queued":
-            connection.execute(
+            cursor = connection.execute(
                 """UPDATE browser_jobs SET status='cancelled', updated_at=?, finished_at=?
                 WHERE job_id=? AND owner_id=? AND status='queued'""",
                 (now, now, job_id, owner_id),
             )
+            if cursor.rowcount == 1:
+                _prune_terminal_jobs(connection, owner_id)
             return "cancelled"
         return str(row["status"])
 
@@ -197,6 +213,8 @@ def complete_job(job_id: str, result: dict[str, Any]) -> bool:
             (json.dumps(result, separators=(",", ":"), ensure_ascii=False),
              now, now, job_id),
         )
+        if cursor.rowcount == 1:
+            _prune_terminal_job_owner(connection, job_id)
     return cursor.rowcount == 1
 
 
@@ -208,6 +226,8 @@ def fail_job(job_id: str, error_code: str) -> bool:
             WHERE job_id=? AND status='running'""",
             (error_code[:80], now, now, job_id),
         )
+        if cursor.rowcount == 1:
+            _prune_terminal_job_owner(connection, job_id)
     return cursor.rowcount == 1
 
 
@@ -219,6 +239,8 @@ def fail_queued_job(job_id: str, error_code: str) -> bool:
             WHERE job_id=? AND status='queued'""",
             (error_code[:80], now, now, job_id),
         )
+        if cursor.rowcount == 1:
+            _prune_terminal_job_owner(connection, job_id)
     return cursor.rowcount == 1
 
 

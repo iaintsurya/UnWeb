@@ -99,7 +99,7 @@ jobs:
           deadline=$(( $(date +%s) + 90 ))
           frontend_ready=0
           while [ "$(date +%s)" -lt "$deadline" ]; do
-            if $compose exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/; then
+            if timeout 5s sh -c "$compose exec -T frontend wget -q -O /dev/null http://127.0.0.1:8080/"; then
               frontend_ready=1
               break
             fi
@@ -110,7 +110,7 @@ jobs:
 
           api_ready=0
           while [ "$(date +%s)" -lt "$deadline" ]; do
-            if $compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).read()"; then
+            if timeout 5s sh -c "$compose exec -T api python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3).read()\""; then
               api_ready=1
               break
             fi

@@ -268,7 +268,8 @@ def test_scan_result_redacts_query_strings_and_sensitive_headers(monkeypatch):
     import json
 
     body = (
-        b'<html><head><title>Home</title><script src="/app.js?token=script-secret"></script>'
+        b'<html><head><title>Home</title><meta property="og:image" content="/meta.png?token=meta-secret">'
+        b'<script src="/app.js?token=script-secret"></script>'
         b'</head><body><a href="/reset?token=reset-secret">Reset</a>'
         b'<img src="/logo.png?api_key=image-secret"></body></html>'
     )
@@ -282,6 +283,7 @@ def test_scan_result_redacts_query_strings_and_sensitive_headers(monkeypatch):
                 "authorization": "Bearer header-secret",
                 "x-api-key": "header-api-secret",
                 "location": "https://example.com/redirect?token=location-secret",
+                "link": "<https://example.com/asset.js?token=link-secret>; rel=preload",
             },
             body,
         )
@@ -297,6 +299,9 @@ def test_scan_result_redacts_query_strings_and_sensitive_headers(monkeypatch):
     assert "authorization" not in result.headers
     assert "x-api-key" not in result.headers
     assert "?token=location-secret" not in serialized
+    assert "?token=link-secret" not in serialized
+    assert "?token=meta-secret" not in serialized
+    assert "https://example.com/asset.js" in serialized
     assert "script-secret" not in serialized
     assert "reset-secret" not in serialized
     assert "image-secret" not in serialized

@@ -186,7 +186,7 @@ def _redact_evidence(line: str) -> str:
         lambda match: f"{match.group('key')}=[REDACTED]", line
     )
     safe = re.sub(
-        r"(?i)(https?://)[^/\s'\"@]+@",
+        r"(?i)(https?://)(?:[^/\s'\"?#]+@)+",
         r"\1[REDACTED]@",
         safe,
     )
@@ -196,8 +196,8 @@ def _redact_evidence(line: str) -> str:
         safe,
     )
     safe = re.sub(
-        r"(?i)(\bcookie:\s*[^=;\s]+=)[^;\s]+",
-        r"\1[REDACTED]",
+        r"(?i)(\bcookie\b['\"]?\s*:\s*['\"]?|;\s*)([^=;\s]+)=([^;]*)",
+        r"\1\2=[REDACTED]",
         safe,
     )
     safe = re.sub(

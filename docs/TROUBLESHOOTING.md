@@ -30,15 +30,14 @@ Common causes are missing `authorised: true`, an unverified target grant in prod
 
 ## Browser jobs remain queued
 
-Check Redis and the worker heartbeat:
+Check Redis and the worker heartbeat from an authenticated operator session through the trusted gateway:
 
 ```bash
 docker compose --env-file .env -f docker-compose.production.yml logs redis browser-worker
-curl -fsS -H 'X-UnWeb-Auth-Token: gateway-only' -H 'X-UnWeb-Auth-User: operator' \
-  https://<trusted-gateway>/api/health/browser-worker
+curl -fsS https://<trusted-gateway>/api/health/browser-worker
 ```
 
-Do not publish the API directly to bypass authentication. Check queue capacity, target grant expiry, and the external egress firewall.
+The gateway's normal OIDC/SAML session or approved service credential must provide identity. Do not copy `X-UnWeb-Auth-Token` or `X-UnWeb-Auth-User` values from a browser or place placeholder headers in scripts. Do not publish the API directly to bypass authentication. Check queue capacity, target grant expiry, and the external egress firewall.
 
 ## Backup or restore fails
 

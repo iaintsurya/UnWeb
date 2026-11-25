@@ -63,6 +63,22 @@ def test_redacts_query_tokens_from_finding_evidence(tmp_path):
     assert "token=[REDACTED]" in rendered
 
 
+def test_redaction_handles_embedded_at_and_multiple_cookie_pairs():
+    from app.repository_analysis import _redact_evidence
+
+    sanitized = _redact_evidence(
+        'requests.get("https://user@evil@host/reset?token=secret", '
+        'headers={"Cookie": "a=one; b=two"})'
+    )
+
+    assert "one" not in sanitized
+    assert "two" not in sanitized
+    assert "secret" not in sanitized
+    assert "https://[REDACTED]@host/reset" in sanitized
+    assert "a=[REDACTED]" in sanitized
+    assert "b=[REDACTED]" in sanitized
+
+
 def test_detects_dynamic_sql_but_not_parameterised_queries(tmp_path):
     write_file(
         tmp_path,
